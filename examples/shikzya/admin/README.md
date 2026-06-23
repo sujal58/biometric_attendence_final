@@ -1,38 +1,41 @@
-# Admin: device registry
+# Admin UI (runnable)
 
-Reference admin pages for **your team** to register sites and devices per tenant.
-Adapt into Shikzya's admin area + design system; they show the model and the
-isolation rules.
+A small browser-based admin app to register sites + devices per tenant and view
+attendance. It auto-creates the database tables on first load.
 
-## Model
+## Run it (one command, then all browser)
 
-```
-Tenant (school)  ->  Site (one agent/PC)  ->  Devices (machines on that LAN)
-```
+1. Edit **`examples/shikzya/config.php`** with your MySQL details (the database
+   must exist; tables are created automatically).
+2. Start a web server pointed at the `examples/shikzya` folder. Easiest:
+   ```
+   php -S localhost:8000 -t examples/shikzya
+   ```
+   (or drop the `examples/shikzya` folder into your existing Shikzya web host —
+   it's just PHP.)
+3. Open **http://localhost:8000/admin/** in your browser.
 
-- A school with 4 devices = 1 site + 4 device rows. A school with 2 = 1 site + 2.
-- `device_id` is per-site (`PRIMARY KEY (site_id, device_id)`), so ids never clash
-  across tenants.
+That's it — no SQL to run, no other terminal steps.
+
+## Use it
+
+- **Dashboard** — counts for the current tenant.
+- **Sites & Devices** — create a site (you get an **install token**), then add the
+  school's devices (IP, license, pull times). Use the token in
+  `install-agent.ps1` on that school's PC.
+- **Attendance** — view punches for a day, mapped to people.
+
+Switch the **Tenant** (top right) to see another school's data — every page is
+isolated to the selected tenant.
 
 ## Pages
 
 | File | Purpose |
 |---|---|
-| `sites.php` | list/create sites for a tenant; creating one generates the `site_token` for `install-agent.ps1` |
-| `devices.php?site_id=N` | list/add/enable/disable devices on a site (ip/port/license/pull_times) |
+| `index.php` | dashboard |
+| `sites.php` | create sites + get install tokens |
+| `devices.php?site_id=N` | add/enable/disable a site's devices |
+| `attendance.php` | view a day's punches |
 
-## Isolation (important)
-
-- `$tenantId` must come from the **authenticated session**, never the request.
-- `devices.php` verifies the `site_id` belongs to `$tenantId` before listing or
-  changing anything, so one tenant can't reach another's devices.
-- Every insert stamps `tenant_id` + `site_id`; every read filters by them.
-
-## Onboarding flow
-
-1. **sites.php** → create the school's site → copy the install token.
-2. Run on the school PC: `install-agent.ps1 -SiteToken <token> -ApiBaseUrl https://app.shikzya.com`.
-3. **devices.php** → add each device with its static LAN IP + license + pull times.
-4. The agent self-configures from `GET /devices`; new devices appear within minutes.
-
-No return visit is needed to add devices later — just add rows here.
+> This is reference UI — adapt it into Shikzya's admin area + design system and
+> replace the tenant switcher with your real session/login.
