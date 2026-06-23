@@ -1,84 +1,54 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+<Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <!-- x86 ONLY: the TimeWatch FKAttend native DLLs are 32-bit (PE32). -->
-    <Platform Condition=" '$(Platform)' == '' ">x86</Platform>
-    <ProjectGuid>{B1C2D3E4-F5A6-47B8-9C0D-1E2F3A4B5C6D}</ProjectGuid>
     <OutputType>Exe</OutputType>
-    <RootNamespace>AttendanceBridge</RootNamespace>
-    <AssemblyName>AttendanceBridge</AssemblyName>
-    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <!-- .NET Framework 4.8: required for the by-value DateTime + ANSI marshalling
+         the native FKAttend SDK expects. -->
+    <TargetFramework>net48</TargetFramework>
+    <!-- x86 ONLY: the TimeWatch FKAttend native DLLs are 32-bit (PE32).
+         Restricting Platforms to x86 means `dotnet build` produces x86 by default. -->
+    <Platforms>x86</Platforms>
     <PlatformTarget>x86</PlatformTarget>
     <Prefer32Bit>true</Prefer32Bit>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <FileAlignment>512</FileAlignment>
-    <Deterministic>true</Deterministic>
+    <RootNamespace>AttendanceBridge</RootNamespace>
+    <AssemblyName>AttendanceBridge</AssemblyName>
     <LangVersion>7.3</LangVersion>
+    <!-- Keep our hand-written Properties\AssemblyInfo.cs instead of generating one. -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
   </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>bin\Debug\</OutputPath>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>bin\Release\</OutputPath>
-    <DefineConstants>TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
+
   <ItemGroup>
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
-    <!-- MySqlConnector's types derive from System.Data.Common base classes. -->
+    <!-- MySqlConnector's types derive from System.Data.Common base classes.
+         System.Web.Extensions provides JavaScriptSerializer (config parsing).
+         Both are added explicitly so resolution never depends on the implicit set. -->
     <Reference Include="System.Data" />
-    <!-- JavaScriptSerializer (config parsing) lives here; framework assembly, no NuGet. -->
     <Reference Include="System.Web.Extensions" />
   </ItemGroup>
-  <!-- MySqlConnector (Phase 2). Uses PackageReference so VS/NuGet restores the
-       full transitive dependency chain automatically on the build machine. -->
+
   <ItemGroup>
     <PackageReference Include="MySqlConnector" Version="2.6.0" />
   </ItemGroup>
-  <ItemGroup>
-    <Compile Include="Program.cs" />
-    <Compile Include="Config\BridgeConfig.cs" />
-    <Compile Include="Logging\Log.cs" />
-    <Compile Include="Interop\FkAttend.cs" />
-    <Compile Include="Interop\FkEnums.cs" />
-    <Compile Include="Device\DeviceConnection.cs" />
-    <Compile Include="Device\DeviceInfoModule.cs" />
-    <Compile Include="Device\TimeSyncModule.cs" />
-    <Compile Include="Device\LogPoller.cs" />
-    <Compile Include="Data\PunchRecord.cs" />
-    <Compile Include="Data\Dedup.cs" />
-    <Compile Include="Data\PunchRepository.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="App.config" />
-    <None Include="appsettings.example.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <!-- Local, gitignored config; copied to output when present. -->
-    <None Include="appsettings.json" Condition="Exists('appsettings.json')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
+
   <!-- Native TimeWatch SDK DLLs: copied next to the exe so FKAttend.dll and its
-       dependencies resolve at runtime. -->
+       dependencies resolve at runtime. (Outside the project folder, so not picked
+       up by the default glob.) -->
   <ItemGroup>
     <Content Include="..\..\native\*.dll">
       <Link>%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+
+  <!-- appsettings files are already globbed as None; just add copy metadata. -->
+  <ItemGroup>
+    <None Update="appsettings.example.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="appsettings.json" Condition="Exists('appsettings.json')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
