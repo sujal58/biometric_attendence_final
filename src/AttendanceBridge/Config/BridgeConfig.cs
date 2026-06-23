@@ -10,10 +10,14 @@ namespace AttendanceBridge.Config
     /// </summary>
     public sealed class BridgeConfig
     {
+        public TenantConfig tenant { get; set; }
         public DeviceConfig device { get; set; }
         public TimeSyncConfig timeSync { get; set; }
         public DatabaseConfig database { get; set; }
         public PollConfig poll { get; set; }
+        public ScheduleConfig schedule { get; set; }
+        public CommandConfig command { get; set; }
+        public WebConfig web { get; set; }
         public LoggingConfig logging { get; set; }
 
         public static BridgeConfig Load(string path)
@@ -37,10 +41,14 @@ namespace AttendanceBridge.Config
 
         private void ApplyDefaults()
         {
+            tenant = tenant ?? new TenantConfig();
             device = device ?? new DeviceConfig();
             timeSync = timeSync ?? new TimeSyncConfig();
             database = database ?? new DatabaseConfig();
             poll = poll ?? new PollConfig();
+            schedule = schedule ?? new ScheduleConfig();
+            command = command ?? new CommandConfig();
+            web = web ?? new WebConfig();
             logging = logging ?? new LoggingConfig();
             if (string.IsNullOrWhiteSpace(logging.directory))
                 logging.directory = "logs";
@@ -49,6 +57,9 @@ namespace AttendanceBridge.Config
                 database.deviceId = device.machineNo;
             if (poll.intervalSeconds <= 0)
                 poll.intervalSeconds = 60;
+            if (command.pollSeconds <= 0)
+                command.pollSeconds = 15;
+            schedule.pullTimes = schedule.pullTimes ?? new string[0];
         }
 
         private void Validate()
@@ -60,6 +71,14 @@ namespace AttendanceBridge.Config
             if (device.timeoutMs <= 0)
                 device.timeoutMs = 5000;
         }
+    }
+
+    public sealed class TenantConfig
+    {
+        /// <summary>Identifies the school in the multi-tenant Shikzya platform.
+        /// Every punch / command is tagged with this so one shared database can
+        /// hold many schools. Set per deployment.</summary>
+        public string tenantId { get; set; } = "";
     }
 
     public sealed class DeviceConfig
@@ -100,6 +119,32 @@ namespace AttendanceBridge.Config
         public bool emptyAfterPull { get; set; } = false;
         /// <summary>Log each decoded record as it is read (handy for verifying data).</summary>
         public bool verbose { get; set; } = false;
+    }
+
+    /// <summary>Unattended scheduled pulls (used by the `serve` agent).</summary>
+    public sealed class ScheduleConfig
+    {
+        /// <summary>Local times (HH:mm) at which to pull, e.g. ["12:00","17:00"].</summary>
+        public string[] pullTimes { get; set; } = new string[0];
+        /// <summary>Pull once when the agent starts.</summary>
+        public bool catchUpOnStart { get; set; } = true;
+    }
+
+    /// <summary>On-demand fetch triggered from Shikzya via the bio_fetch_command table.</summary>
+    public sealed class CommandConfig
+    {
+        public bool enabled { get; set; } = true;
+        /// <summary>How often the agent checks for pending fetch commands.</summary>
+        public int pollSeconds { get; set; } = 15;
+    }
+
+    /// <summary>Local web UI + REST API hosted at the school (built in increment 3b).</summary>
+    public sealed class WebConfig
+    {
+        public bool enabled { get; set; } = true;
+        /// <summary>HttpListener prefix. Use http://localhost:8080/ for this PC only,
+        /// or http://+:8080/ to allow other PCs on the school LAN (needs a urlacl).</summary>
+        public string url { get; set; } = "http://localhost:8080/";
     }
 
     public sealed class LoggingConfig

@@ -16,11 +16,13 @@ namespace AttendanceBridge.Data
     /// </summary>
     public static class Dedup
     {
-        public static string Key(int deviceId, int enrollNumber, DateTime punchTime, int inOutMode)
+        public static string Key(string tenantId, int deviceId, int enrollNumber, DateTime punchTime, int inOutMode)
         {
             // Stable, culture-invariant components joined with a separator that
-            // cannot appear inside any of them.
+            // cannot appear inside any of them. tenant_id is included so the same
+            // device id under different schools never collides in a shared DB.
             string raw = string.Join("|",
+                tenantId ?? "",
                 deviceId.ToString(),
                 enrollNumber.ToString(),
                 punchTime.ToString("yyyy-MM-ddTHH:mm:ss"),

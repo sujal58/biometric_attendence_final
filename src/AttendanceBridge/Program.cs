@@ -12,12 +12,13 @@ namespace AttendanceBridge
     /// <summary>
     /// Console entry point.
     ///
-    ///   AttendanceBridge.exe info   - connect, print device info, sync clock (Phase 1)
-    ///   AttendanceBridge.exe pull   - connect, sync clock, pull logs into MySQL once (Phase 2)
-    ///   AttendanceBridge.exe poll   - keep pulling on an interval until Ctrl+C (Phase 2)
+    ///   AttendanceBridge.exe info   - connect, print device info, sync clock
+    ///   AttendanceBridge.exe pull   - connect, sync clock, pull logs into MySQL once
+    ///   AttendanceBridge.exe poll   - keep pulling on a fixed interval until Ctrl+C
+    ///   AttendanceBridge.exe serve  - unattended agent: scheduled pulls + on-demand
+    ///                                 fetch commands from Shikzya (run via Task Scheduler)
     ///
-    /// No command defaults to "info". A Windows-Service host and the local REST
-    /// API arrive in Phase 3.
+    /// No command defaults to "info". The local web UI is hosted by `serve`.
     /// </summary>
     internal static class Program
     {
@@ -60,8 +61,9 @@ namespace AttendanceBridge
                 case "info": return RunInfo(cfg);
                 case "pull": return RunPull(cfg);
                 case "poll": return RunPoll(cfg);
+                case "serve": return RunServe(cfg);
                 default:
-                    Console.Error.WriteLine("Unknown command '" + command + "'. Use: info | pull | poll.");
+                    Console.Error.WriteLine("Unknown command '" + command + "'. Use: info | pull | poll | serve.");
                     return 4;
             }
         }
@@ -153,7 +155,7 @@ namespace AttendanceBridge
 
         // ---- shared helpers ------------------------------------------------
 
-        private static void PullOnce(DeviceConnection conn, BridgeConfig cfg, PunchRepository repo)
+        private static PullResult PullOnce(DeviceConnection conn, BridgeConfig cfg, PunchRepository repo)
         {
             var pulledAt = DateTime.Now;
             var poller = new LogPoller(conn);
@@ -174,6 +176,84 @@ namespace AttendanceBridge
                 Log.Warn("emptyAfterPull is enabled - clearing the device log now that records are saved.");
                 poller.EmptyLog();
             }
+
+            return new PullResult { Read = records.Count, Inserted = inserted };
+        }
+
+        // ---- serve: unattended agent (scheduled pulls + on-demand commands) -
+        private static int RunServe(BridgeConfig cfg)
+        {
+            if (!RequireDatabase(cfg, out var repo)) return 5;
+
+            Console.CancelKeyPress += (s, e) => { e.Cancel = true; _stop = true; Log.Info("Stop requested..."); };
+            Log.Info("Agent (serve) started. Tenant='" + cfg.tenant.tenantId + "', device=" + cfg.database.deviceId + ".");
+            Log.Info("Scheduled pull times: [" + string.Join(", ", cfg.schedule.pullTimes) + "]" +
+                     (cfg.schedule.pullTimes.Length == 0 ? " (none set)" : "") + ".");
+            Log.Info("On-demand commands: " + (cfg.command.enabled
+                ? "polling every " + cfg.command.pollSeconds + "s" : "disabled") + ".");
+
+            var scheduler = new DailyScheduler(cfg.schedule.pullTimes);
+            int tick = cfg.command.enabled ? cfg.command.pollSeconds : 30;
+
+            using (var conn = new DeviceConnection(cfg.device))
+            {
+                if (cfg.schedule.catchUpOnStart)
+                    SafePull(conn, cfg, repo, "startup", null);
+
+                while (!_stop)
+                {
+                    foreach (var due in scheduler.DueNow(DateTime.Now))
+                        SafePull(conn, cfg, repo, "schedule " + due, null);
+
+                    if (cfg.command.enabled)
+                    {
+                        FetchCommand cmd;
+                        while (!_stop && (cmd = TryClaim(repo)) != null)
+                            SafePull(conn, cfg, repo, "command#" + cmd.Id, cmd);
+                    }
+
+                    Sleep(tick);
+                }
+            }
+            Log.Info("Agent stopped.");
+            return 0;
+        }
+
+        // Connects if needed, syncs the clock on a fresh connect, pulls, and (if the
+        // pull was triggered by a Shikzya command) reports the result back to the queue.
+        private static void SafePull(DeviceConnection conn, BridgeConfig cfg, PunchRepository repo, string reason, FetchCommand cmd)
+        {
+            Log.Info("Pull trigger: " + reason);
+            try
+            {
+                if (!conn.IsConnected)
+                {
+                    if (!conn.Connect())
+                    {
+                        if (cmd != null) repo.CompleteCommand(cmd.Id, false, 0, 0, "device connect failed");
+                        return;
+                    }
+                    SyncClock(conn, cfg); // only right after a fresh connect
+                }
+
+                var res = PullOnce(conn, cfg, repo);
+                if (cmd != null)
+                    repo.CompleteCommand(cmd.Id, true, res.Read, res.Inserted,
+                        "read " + res.Read + ", inserted " + res.Inserted);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Pull failed (" + reason + ").", ex);
+                repo.WriteBridgeLog("ERROR", "pull", ex.Message);
+                if (cmd != null) repo.CompleteCommand(cmd.Id, false, 0, 0, ex.Message);
+                conn.Disconnect(); // force a clean reconnect next time
+            }
+        }
+
+        private static FetchCommand TryClaim(PunchRepository repo)
+        {
+            try { return repo.ClaimNextCommand(); }
+            catch (Exception ex) { Log.Warn("Could not poll fetch commands: " + ex.Message); return null; }
         }
 
         private static void SyncClock(DeviceConnection conn, BridgeConfig cfg)
@@ -196,7 +276,7 @@ namespace AttendanceBridge
                     "Set it in appsettings.json before using pull/poll.");
                 return false;
             }
-            repo = new PunchRepository(cfg.database.connectionString, cfg.database.deviceId);
+            repo = new PunchRepository(cfg.database.connectionString, cfg.tenant.tenantId, cfg.database.deviceId);
             try
             {
                 repo.EnsureReachable();
@@ -236,6 +316,49 @@ namespace AttendanceBridge
 
             // Return the primary location so the not-found error names where to put it.
             return candidates[0];
+        }
+    }
+
+    internal sealed class PullResult
+    {
+        public int Read;
+        public int Inserted;
+    }
+
+    /// <summary>
+    /// Fires once per configured HH:mm time per day. DueNow returns the times that
+    /// have arrived since the last check today; the set resets at midnight.
+    /// </summary>
+    internal sealed class DailyScheduler
+    {
+        private readonly System.Collections.Generic.List<TimeSpan> _times =
+            new System.Collections.Generic.List<TimeSpan>();
+        private readonly System.Collections.Generic.HashSet<string> _firedToday =
+            new System.Collections.Generic.HashSet<string>();
+        private DateTime _day = DateTime.MinValue.Date;
+
+        public DailyScheduler(string[] times)
+        {
+            foreach (var t in times ?? new string[0])
+                if (TimeSpan.TryParse(t, out var ts))
+                    _times.Add(ts);
+        }
+
+        public System.Collections.Generic.IEnumerable<string> DueNow(DateTime now)
+        {
+            if (now.Date != _day) { _day = now.Date; _firedToday.Clear(); }
+
+            var due = new System.Collections.Generic.List<string>();
+            foreach (var ts in _times)
+            {
+                string key = ts.ToString();
+                if (now.TimeOfDay >= ts && !_firedToday.Contains(key))
+                {
+                    _firedToday.Add(key);
+                    due.Add(string.Format("{0:00}:{1:00}", ts.Hours, ts.Minutes));
+                }
+            }
+            return due;
         }
     }
 }
