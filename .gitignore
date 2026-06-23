@@ -11,9 +11,13 @@
 # Ship appsettings.example.json instead.
 appsettings.json
 
-# Runtime logs
+# Runtime logs + offline spool
 logs/
 *.log
+spool/
+
+# Publish output (the deployable agent is built, not committed)
+scripts/publish/
 
 # OS
 Thumbs.db

@@ -2,54 +2,29 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <!-- .NET Framework 4.8: required for the by-value DateTime + ANSI marshalling
-         the native FKAttend SDK expects. -->
-    <TargetFramework>net48</TargetFramework>
-    <!-- x86 ONLY: the TimeWatch FKAttend native DLLs are 32-bit (PE32).
-         Restricting Platforms to x86 means `dotnet build` produces x86 by default. -->
-    <Platforms>x86</Platforms>
+    <!-- net8 + win-x86: the TimeWatch FKAttend native DLLs are 32-bit. Self-contained
+         single-file publish means the school PC needs no .NET install. -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
     <PlatformTarget>x86</PlatformTarget>
-    <Prefer32Bit>true</Prefer32Bit>
+    <Platforms>x86</Platforms>
+    <SelfContained>true</SelfContained>
     <RootNamespace>AttendanceBridge</RootNamespace>
     <AssemblyName>AttendanceBridge</AssemblyName>
-    <LangVersion>7.3</LangVersion>
-    <!-- Keep our hand-written Properties\AssemblyInfo.cs instead of generating one. -->
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- MySqlConnector's types derive from System.Data.Common base classes.
-         System.Web.Extensions provides JavaScriptSerializer (config parsing).
-         Both are added explicitly so resolution never depends on the implicit set. -->
-    <Reference Include="System.Data" />
-    <Reference Include="System.Web.Extensions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="MySqlConnector" Version="2.6.0" />
-  </ItemGroup>
-
-  <!-- The schema is embedded so the bridge can auto-create the bio_* tables at
-       runtime (CREATE TABLE IF NOT EXISTS). Single source of truth = db/schema.sql. -->
-  <ItemGroup>
-    <EmbeddedResource Include="..\..\db\schema.sql">
-      <LogicalName>AttendanceBridge.schema.sql</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
-
-  <!-- The school-facing web page is embedded and served by the `serve` agent. -->
-  <ItemGroup>
-    <None Remove="webui.html" />
-    <EmbeddedResource Include="webui.html">
-      <LogicalName>AttendanceBridge.webui.html</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
-
-  <!-- Native TimeWatch SDK DLLs: copied next to the exe so FKAttend.dll and its
-       dependencies resolve at runtime. (Outside the project folder, so not picked
-       up by the default glob.) -->
+  <!-- Native TimeWatch SDK DLLs copied next to the exe (P/Invoke targets - kept as
+       separate files even with single-file publish). -->
   <ItemGroup>
     <Content Include="..\..\native\*.dll">
       <Link>%(Filename)%(Extension)</Link>
@@ -57,7 +32,6 @@
     </Content>
   </ItemGroup>
 
-  <!-- appsettings files are already globbed as None; just add copy metadata. -->
   <ItemGroup>
     <None Update="appsettings.example.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

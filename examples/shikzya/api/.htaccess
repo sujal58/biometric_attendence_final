@@ -1,0 +1,7 @@
+# Route everything under this folder to index.php, and make sure the
+# Authorization header reaches PHP (some Apache/FPM setups strip it).
+RewriteEngine On
+RewriteCond %{HTTP:Authorization} ^(.+)$
+RewriteRule ^ - [E=HTTP_AUTHORIZATION:%1]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ index.php [QSA,L]

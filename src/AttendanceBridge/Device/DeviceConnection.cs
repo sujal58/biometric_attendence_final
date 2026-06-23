@@ -1,14 +1,24 @@
 using System;
-using AttendanceBridge.Config;
 using AttendanceBridge.Interop;
 using AttendanceBridge.Logging;
 
 namespace AttendanceBridge.Device
 {
+    /// <summary>Connection parameters for one device (from the API device list).</summary>
+    public sealed class DeviceParams
+    {
+        public int MachineNo = 1;
+        public string IpAddress;
+        public int NetPort = 5005;
+        public int TimeoutMs = 5000;
+        public int ProtocolType = 0;   // 0 = TCP/IP, 1 = UDP
+        public int NetPassword = 0;
+        public int License = 1261;
+    }
+
     /// <summary>
-    /// Owns a single network session to the biometric device. The TimeWatch
-    /// devices are effectively single-client, so the whole application shares
-    /// one connection and one handle.
+    /// Owns a single network session to one biometric device. The TimeWatch
+    /// devices are single-client, so each connection holds one handle.
     ///
     /// All device operations should be wrapped in <see cref="EnableScope"/> so
     /// the device is locked (FK_EnableDevice 0) for the duration of the call
@@ -17,14 +27,14 @@ namespace AttendanceBridge.Device
     /// </summary>
     public sealed class DeviceConnection : IDisposable
     {
-        private readonly DeviceConfig _cfg;
+        private readonly DeviceParams _p;
 
         public int Handle { get; private set; } = -1;
         public bool IsConnected => Handle > 0;
 
-        public DeviceConnection(DeviceConfig cfg)
+        public DeviceConnection(DeviceParams p)
         {
-            _cfg = cfg ?? throw new ArgumentNullException(nameof(cfg));
+            _p = p ?? throw new ArgumentNullException(nameof(p));
         }
 
         /// <summary>
@@ -35,20 +45,20 @@ namespace AttendanceBridge.Device
         {
             Log.Info(string.Format(
                 "Connecting to device #{0} at {1}:{2} (protocol={3}, timeout={4}ms)...",
-                _cfg.machineNo, _cfg.ipAddress, _cfg.netPort,
-                (ProtocolType)_cfg.protocolType, _cfg.timeoutMs));
+                _p.MachineNo, _p.IpAddress, _p.NetPort,
+                (ProtocolType)_p.ProtocolType, _p.TimeoutMs));
 
             int result;
             try
             {
                 result = FkAttend.FK_ConnectNet(
-                    _cfg.machineNo,
-                    _cfg.ipAddress,
-                    _cfg.netPort,
-                    _cfg.timeoutMs,
-                    _cfg.protocolType,
-                    _cfg.netPassword,
-                    _cfg.license);
+                    _p.MachineNo,
+                    _p.IpAddress,
+                    _p.NetPort,
+                    _p.TimeoutMs,
+                    _p.ProtocolType,
+                    _p.NetPassword,
+                    _p.License);
             }
             catch (DllNotFoundException ex)
             {

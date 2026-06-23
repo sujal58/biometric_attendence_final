@@ -1,47 +1,45 @@
-# Shikzya integration examples
+# Shikzya integration
 
-Reference PHP for wiring the multi-tenant Shikzya platform to the bridge. Adapt
-the DB connection and auth to your framework; treat these as the contract, not
-drop-in files.
+Two parts:
+
+- **`api/`** — the HTTPS API the **agents** call (devices, punches, commands,
+  command result, heartbeat). See [api/README.md](api/README.md).
+- **this folder** — examples for **Shikzya's own UI** (the school-facing app):
+  queue a fetch, poll its status, read attendance.
 
 ## Data flow
 
 ```
 School clicks "Fetch attendance" in Shikzya
+        │  trigger_fetch.php  -> INSERT bio_fetch_command (pending)
+        ▼
+The school's agent (GET /api/bridge/v1/commands) claims it, pulls from the
+device, POSTs punches, and reports the result (POST .../result)
         │
         ▼
-trigger_fetch.php  ──INSERT──►  bio_fetch_command (status=pending, tenant_id, device_id)
-                                        │
-              the school's bridge (serve) polls this table for its tenant+device
-                                        │
-                                        ▼
-                       bridge pulls from the device, writes bio_punch,
-                       marks the command done (records_read / inserted)
-                                        │
-command_status.php  ◄──SELECT──  bio_fetch_command   (UI polls until done/error)
-read_attendance.php ◄──SELECT──  bio_punch ⨝ bio_enroll_map   (show attendance)
+command_status.php  (UI polls until done/error)
+read_attendance.php (bio_punch ⨝ bio_enroll_map -> show attendance)
 ```
 
-The school can also fetch from the **local web page** the bridge hosts
-(`http://<school-pc>:8080/`) — same effect, no Shikzya round-trip.
+Scheduled pulls (per device `pull_times`) and a periodic heartbeat happen
+automatically — no button needed.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `trigger_fetch.php` | Queue a fetch command for a school's device (the button). |
-| `command_status.php` | Poll a command's status/result by id. |
-| `read_attendance.php` | Read a school's punches for a day, joined to `bio_enroll_map`. |
+| `trigger_fetch.php` | queue a fetch command for a device (the button) |
+| `command_status.php` | poll a command's status/result by id |
+| `read_attendance.php` | read a school's punches for a day, joined to people |
+| `api/` | the agent-facing HTTPS API + server schema usage |
 
-## Multi-tenancy
+## Onboarding a school (your team)
 
-Every row carries `tenant_id` (the school). Always filter by the logged-in
-school's `tenant_id`. Each school's bridge is configured with its own `tenantId`
-in `appsettings.json`, so a command/punch for school A is only ever handled by
-school A's bridge.
+1. Insert a `bio_site` row with a random `site_token`.
+2. Insert `bio_device` rows for that site (ip/port/license/pull_times).
+3. Run `install-agent.ps1 -SiteToken <token> -ApiBaseUrl https://app.shikzya.com`
+   on the school PC. The agent self-configures. Adding more devices later = more
+   rows; no return visit.
 
-## Mapping device users to people
-
-`bio_punch.enroll_number` is the id on the device, not your student/staff id.
-Populate `bio_enroll_map` (per `tenant_id` + `device_id`) to map them. Show
-unmapped enroll numbers in an admin screen so staff can assign them.
+`enroll_number` is the device-side id — map people in `bio_enroll_map` and show
+unmapped ones in an admin screen.
