@@ -1,0 +1,20 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+
+# Visual Studio
+.vs/
+
+# Local secrets — real device IP / comm password / license / DB creds.
+# Ship appsettings.example.json instead.
+appsettings.json
+
+# Runtime logs
+logs/
+*.log
+
+# OS
+Thumbs.db
+desktop.ini
