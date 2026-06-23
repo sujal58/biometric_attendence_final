@@ -1,75 +1,49 @@
 # AttendanceBridge
 
-Middleware that connects a **TimeWatch Bio-27** biometric attendance device to a
-**PHP school management system**.
+Middleware that connects a **TimeWatch Bio-27** biometric attendance device to
+**Shikzya**, a multi-tenant school management platform. One bridge is deployed
+per school (on the LAN with the device); all schools' data lands in MySQL that
+Shikzya reads, tagged by tenant.
 
 ## Why a bridge is needed
 
 The TimeWatch SDK talks to the device through **native 32-bit DLLs**
 (`FKAttend.dll` plus siblings), called via P/Invoke. PHP can't load those
 in-process, and neither can any 64-bit program. So this small **x86 .NET
-Framework 4.8** service sits in the middle: it owns the device session, pulls
-attendance data into the same MySQL database the school system already uses, and
-exposes a tiny localhost API for admin actions.
+Framework 4.8** agent sits in the middle: it owns the device session, pulls
+attendance into MySQL, and exposes both a local web page and an on-demand
+command queue so schools can fetch on demand.
 
-## Roadmap
+## How it works
 
-- **Phase 1 (done): connect + device info + time sync.** A console app that
-  connects over TCP/IP, prints the device identity / configuration / record
-  counts, reads the device clock and corrects drift.
-- **Phase 2 (current): attendance log pull into MySQL** with idempotent
-  de-duplication.
-- **Phase 3: PHP consumption + a loopback REST API** the admin UI can trigger
-  (test connection, sync time, pull now, read device info), plus a Windows
-  Service host.
+```
+School fetches  ─┬─►  Shikzya button ──► bio_fetch_command (DB)  ─┐
+(on demand)      └─►  local web page at http://<school-pc>:8080/ ─┤
+                                                                  ▼
+                                          AttendanceBridge `serve` agent
+                                          (also pulls at scheduled times)
+                                                                  │ pulls via FKAttend.dll
+                                                                  ▼
+                                          TimeWatch device on the school LAN
+                                                                  │
+                                                                  ▼
+                                          MySQL bio_punch (tenant-tagged)
+                                                                  ▼
+                                          Shikzya reads & shows attendance
+```
 
 ## Commands
 
 ```
-AttendanceBridge.exe info    connect, print device info, sync the clock (Phase 1)
-AttendanceBridge.exe pull    connect, sync clock, pull attendance logs into MySQL once
-AttendanceBridge.exe poll    keep pulling on an interval until Ctrl+C
+AttendanceBridge.exe info    connect, print device info, sync the clock
+AttendanceBridge.exe pull    connect, sync clock, pull attendance into MySQL once
+AttendanceBridge.exe poll    keep pulling on a fixed interval until Ctrl+C
+AttendanceBridge.exe serve   unattended agent: scheduled pulls + on-demand fetch
+                             commands from Shikzya + local web UI (use in production)
 ```
 
-`info` needs no database. `pull` / `poll` require `database.connectionString` in
-`appsettings.json`.
-
-## Database (Phase 2)
-
-The bridge **auto-creates its tables** on the first `pull` / `poll` (it runs the
-bundled schema with `CREATE TABLE IF NOT EXISTS`). You only need to:
-
-1. Make sure the **database** named in `database.connectionString` already
-   exists (the bridge creates tables, not the database).
-2. Point `database.connectionString` at it.
-
-Applying [db/schema.sql](db/schema.sql) by hand is optional (kept as the single
-source of truth and for manual setup). It creates:
-
-| Table | Purpose |
-|---|---|
-| `bio_punch` | raw attendance punches (bridge writes, PHP reads) |
-| `bio_enroll_map` | maps a device `enroll_number` to a student/staff person |
-| `bio_device` | per-device connection details + last-pull health |
-| `bio_bridge_log` | the bridge's own operational log |
-
-The bridge pulls the **whole** log each cycle and relies on a unique
-`dedup_key = SHA1(device_id|enroll_number|punch_time|in_out_mode)` so re-pulls
-never create duplicates. It does **not** clear the device log unless
-`poll.emptyAfterPull` is set. `enroll_number` is the device-side id, not the
-student id — assign people in `bio_enroll_map`.
-
-Phase 2 adds the **MySqlConnector** NuGet package; restore happens automatically
-when you build the solution in Visual Studio.
-
-## Requirements
-
-- Windows with the **.NET Framework 4.8** runtime.
-- To build: Visual Studio 2022 (or Build Tools) with the **.NET desktop
-  development** workload, which includes the .NET Framework 4.8 targeting pack.
-- The **Visual C++ x86 redistributable** the native DLLs depend on.
-- The `native/` folder must contain the TimeWatch SDK DLLs (see below). They are
-  copied next to the built `AttendanceBridge.exe` automatically.
+`info` needs no database. `pull` / `poll` / `serve` require a configured
+`database.connectionString`. From the repo root you can also use `.\bridge.cmd <command>`.
 
 ## Configure
 
@@ -78,37 +52,80 @@ cd src/AttendanceBridge
 copy appsettings.example.json appsettings.json
 ```
 
-Edit `appsettings.json` with your real values:
+Key settings in `appsettings.json` (git-ignored — holds per-site values):
 
-| Setting | Meaning | Note |
+| Section | Setting | Meaning |
 |---|---|---|
-| `device.ipAddress` / `device.netPort` | Device address on the LAN | SDK defaults `192.168.1.33` / `5005` |
-| `device.machineNo` | Device ID | Usually `1` |
-| `device.netPassword` | Comm password | `0` unless set on the device |
-| `device.license` | SDK license integer | Start with `1261`; if connect fails, TimeWatch supplies it |
-| `timeSync.maxDriftSeconds` | Clock correction threshold | Only re-sets the clock past this drift |
+| `tenant` | `tenantId` | The school's id in Shikzya. Tags every punch/command. |
+| `device` | `ipAddress`/`netPort` | Device on the LAN (SDK defaults `192.168.1.33`/`5005`). |
+| `device` | `netPassword` / `license` | Comm password (`0` unless set) / SDK license (try `1261`). |
+| `database` | `connectionString` | MySQL Shikzya reads from. `deviceId` defaults to `machineNo`. |
+| `schedule` | `pullTimes` | Local times to auto-pull, e.g. `["12:00","17:00"]`. |
+| `command` | `pollSeconds` | How often `serve` checks for Shikzya fetch commands. |
+| `web` | `url` | Local web UI prefix (`http://localhost:8080/`, or `http://+:8080/` for LAN). |
 
-`appsettings.json` is git-ignored because it holds site-specific values.
+## Database
+
+The bridge **auto-creates its tables** on first DB use (`CREATE TABLE IF NOT
+EXISTS`). You only need the database in the connection string to already exist.
+[db/schema.sql](db/schema.sql) is the single source of truth:
+
+| Table | Purpose |
+|---|---|
+| `bio_punch` | raw attendance punches (tenant-tagged; bridge writes, Shikzya reads) |
+| `bio_enroll_map` | maps a device `enroll_number` to a student/staff person |
+| `bio_device` | per-device connection details + last-pull health |
+| `bio_fetch_command` | on-demand fetch queue (Shikzya inserts; bridge services) |
+| `bio_bridge_log` | the bridge's own operational log |
+
+Every row carries `tenant_id` so one shared database holds many schools. Pulls
+read the **whole** log and de-duplicate on
+`dedup_key = SHA1(tenant_id|device_id|enroll_number|punch_time|in_out_mode)`, so
+re-pulls never create duplicates. The device log is never cleared unless
+`poll.emptyAfterPull` is set. `enroll_number` is the device-side id — map people
+in `bio_enroll_map`. Verify/in-out codes are bit-packed by the device and stored
+both raw and decoded (`verify_label`, `io_mode`, `door_mode`).
+
+## Production deployment (per school)
+
+1. Build Release and copy the output folder to a stable path (e.g. `C:\AttendanceBridge`).
+2. Put a configured `appsettings.json` next to the exe.
+3. Install the agent so it runs at boot (admin PowerShell):
+   ```
+   powershell -ExecutionPolicy Bypass -File scripts\install-task.ps1 -ExePath C:\AttendanceBridge\AttendanceBridge.exe
+   ```
+   This registers a scheduled task that runs `serve` at startup and restarts it
+   if it stops. Remove with `scripts\uninstall-task.ps1`.
+
+### Letting school staff open the web page from another PC
+By default the UI binds to `http://localhost:8080/` (that PC only). For LAN
+access set `web.url` to `http://+:8080/` and, once as admin:
+```
+netsh http add urlacl url=http://+:8080/ user=Everyone
+netsh advfirewall firewall add rule name="AttendanceBridge" dir=in action=allow protocol=TCP localport=8080
+```
+Staff then open `http://<school-pc-ip>:8080/`.
+
+## Shikzya integration
+
+See [examples/shikzya/](examples/shikzya/) for reference PHP: queue a fetch
+command (the button), poll its status, and read a school's attendance joined to
+`bio_enroll_map`.
+
+## Requirements
+
+- Windows with the **.NET Framework 4.8** runtime + the **Visual C++ x86 redistributable**.
+- To build: Visual Studio 2022 / Build Tools with the **.NET desktop development** workload.
+- The `native/` folder must contain the TimeWatch SDK DLLs (copied next to the exe automatically):
+  ```
+  FKAttend.dll  FKViaDev.dll  LFWViaDev.dll  FaceDataConv.dll  FpDataConv.dll  FKPwdEncDec.dll
+  ```
 
 ## Build & run
 
-Open `AttendanceBridge.sln` in Visual Studio (the **x86** solution platform) and
-run, or from a Developer command prompt:
-
 ```
-msbuild AttendanceBridge.sln /p:Configuration=Debug /p:Platform=x86
-src\AttendanceBridge\bin\Debug\AttendanceBridge.exe
+dotnet build
+.\src\AttendanceBridge\bin\x86\Debug\net48\AttendanceBridge.exe info
 ```
-
-A successful run logs the device serial/model, record counts and the clock
-drift. Without the physical device on the LAN the connection step fails with a
-clear message (it must not throw `BadImageFormatException` — that would mean the
-process is running 64-bit).
-
-## `native/` DLLs
-
-Copied from the vendor SDK; required at runtime next to the exe:
-
-```
-FKAttend.dll  FKViaDev.dll  LFWViaDev.dll  FaceDataConv.dll  FpDataConv.dll  FKPwdEncDec.dll
-```
+The project is x86-only (the native DLLs are 32-bit). A run that throws
+`BadImageFormatException` means it built/ran 64-bit.
