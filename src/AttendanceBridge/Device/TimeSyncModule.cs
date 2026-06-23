@@ -20,15 +20,15 @@ namespace AttendanceBridge.Device
         public DateTime ReadDeviceTime()
         {
             _conn.EnsureConnected();
-            DateTime deviceTime = DateTime.Now;
+            double oaDate = 0;
             using (_conn.EnableScope())
             {
-                int rc = FkAttend.FK_GetDeviceTime(_conn.Handle, ref deviceTime);
+                int rc = FkAttend.FK_GetDeviceTime(_conn.Handle, ref oaDate);
                 if (rc != (int)FkError.Success)
                     throw new InvalidOperationException(
                         "FK_GetDeviceTime returned " + DeviceConnection.Describe(rc));
             }
-            return deviceTime;
+            return DateTime.FromOADate(oaDate);
         }
 
         public bool SetDeviceTime(DateTime when)
@@ -36,7 +36,7 @@ namespace AttendanceBridge.Device
             _conn.EnsureConnected();
             using (_conn.EnableScope())
             {
-                int rc = FkAttend.FK_SetDeviceTime(_conn.Handle, when);
+                int rc = FkAttend.FK_SetDeviceTime(_conn.Handle, when.ToOADate());
                 if (rc != (int)FkError.Success)
                 {
                     Log.Error("FK_SetDeviceTime returned " + DeviceConnection.Describe(rc));

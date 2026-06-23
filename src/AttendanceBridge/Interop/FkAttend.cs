@@ -62,15 +62,21 @@ namespace AttendanceBridge.Interop
             int anStatusIndex,
             ref int apnValue);
 
+        // The native SDK represents date/time as an OLE Automation DATE (an 8-byte
+        // double, days since 1899-12-30). .NET Framework marshalled System.DateTime
+        // to this automatically; we now pass the double explicitly so the code is
+        // portable to .NET 8 (which does not marshal DateTime). Convert with
+        // DateTime.ToOADate() / DateTime.FromOADate().
+
         [DllImport(Dll, CharSet = CharSet.Ansi)]
         public static extern int FK_GetDeviceTime(
             int anHandleIndex,
-            ref DateTime apnDateTime);
+            ref double apnDateTime);
 
         [DllImport(Dll, CharSet = CharSet.Ansi)]
         public static extern int FK_SetDeviceTime(
             int anHandleIndex,
-            DateTime anDateTime);
+            double anDateTime);
 
         [DllImport(Dll, CharSet = CharSet.Ansi)]
         public static extern int FK_GetDeviceInfo(
@@ -104,7 +110,7 @@ namespace AttendanceBridge.Interop
             ref int apnEnrollNumber,
             ref int apnVerifyMode,
             ref int apnInOutMode,
-            ref DateTime apnDateTime);
+            ref double apnDateTime);          // OLE Automation date (see note above)
 
         [DllImport(Dll, CharSet = CharSet.Ansi)]
         public static extern int FK_GetTemperatureLogData(
@@ -112,7 +118,7 @@ namespace AttendanceBridge.Interop
             ref int apnEnrollNumber,
             ref int apnVerifyMode,
             ref int apnInOutMode,
-            ref DateTime apnDateTime,
+            ref double apnDateTime,           // OLE Automation date (see note above)
             ref int apnTemperature);
 
         [DllImport(Dll, CharSet = CharSet.Ansi)]

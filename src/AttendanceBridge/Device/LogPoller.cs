@@ -50,17 +50,17 @@ namespace AttendanceBridge.Device
                 while (true)
                 {
                     int enroll = 0, verify = 0, inOut = 0, temp = 0;
-                    DateTime when = DateTime.MinValue;
+                    double whenOa = 0;
                     bool hasTemp = true;
 
                     int r = FkAttend.FK_GetTemperatureLogData(
-                        _conn.Handle, ref enroll, ref verify, ref inOut, ref when, ref temp);
+                        _conn.Handle, ref enroll, ref verify, ref inOut, ref whenOa, ref temp);
 
                     if (r == (int)FkError.NoSupport)
                     {
                         hasTemp = false;
                         r = FkAttend.FK_GetGeneralLogData(
-                            _conn.Handle, ref enroll, ref verify, ref inOut, ref when);
+                            _conn.Handle, ref enroll, ref verify, ref inOut, ref whenOa);
                     }
 
                     if (r != (int)FkError.Success)
@@ -76,7 +76,7 @@ namespace AttendanceBridge.Device
                         EnrollNumber = enroll,
                         VerifyMode = verify,
                         InOutMode = inOut,
-                        PunchTime = when,
+                        PunchTime = DateTime.FromOADate(whenOa),
                         Temperature = hasTemp ? (int?)temp : null,
                     };
                     record.Decode();
