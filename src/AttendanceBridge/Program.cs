@@ -218,13 +218,24 @@ namespace AttendanceBridge
                 Thread.Sleep(100); // responsive to Ctrl+C
         }
 
-        // Config resolution: --config <path>, else appsettings.json next to exe.
+        // Config resolution order: --config <path>, then appsettings.json next to
+        // the exe, then appsettings.json in the current working directory.
         private static string ResolveConfigPath(string baseDir, string[] args)
         {
             for (int i = 0; i < args.Length - 1; i++)
                 if (string.Equals(args[i], "--config", StringComparison.OrdinalIgnoreCase))
                     return args[i + 1];
-            return Path.Combine(baseDir, "appsettings.json");
+
+            var candidates = new[]
+            {
+                Path.Combine(baseDir, "appsettings.json"),
+                Path.Combine(Environment.CurrentDirectory, "appsettings.json"),
+            };
+            foreach (var c in candidates)
+                if (File.Exists(c)) return c;
+
+            // Return the primary location so the not-found error names where to put it.
+            return candidates[0];
         }
     }
 }

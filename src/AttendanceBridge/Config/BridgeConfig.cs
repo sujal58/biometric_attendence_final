@@ -20,8 +20,10 @@ namespace AttendanceBridge.Config
         {
             if (!File.Exists(path))
                 throw new FileNotFoundException(
-                    "Configuration file not found. Copy appsettings.example.json " +
-                    "to appsettings.json and fill in your device/network details.", path);
+                    "Configuration file not found at '" + path + "'. Copy appsettings.example.json " +
+                    "to appsettings.json (next to the executable) and fill in your device/network " +
+                    "details. If you just created/edited it in the project folder, rebuild so it " +
+                    "copies to the output folder.", path);
 
             var json = File.ReadAllText(path);
             var cfg = new JavaScriptSerializer().Deserialize<BridgeConfig>(json);
