@@ -40,6 +40,11 @@
     <!-- JavaScriptSerializer (config parsing) lives here; framework assembly, no NuGet. -->
     <Reference Include="System.Web.Extensions" />
   </ItemGroup>
+  <!-- MySqlConnector (Phase 2). Uses PackageReference so VS/NuGet restores the
+       full transitive dependency chain automatically on the build machine. -->
+  <ItemGroup>
+    <PackageReference Include="MySqlConnector" Version="2.3.7" />
+  </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="Config\BridgeConfig.cs" />
@@ -49,6 +54,10 @@
     <Compile Include="Device\DeviceConnection.cs" />
     <Compile Include="Device\DeviceInfoModule.cs" />
     <Compile Include="Device\TimeSyncModule.cs" />
+    <Compile Include="Device\LogPoller.cs" />
+    <Compile Include="Data\PunchRecord.cs" />
+    <Compile Include="Data\Dedup.cs" />
+    <Compile Include="Data\PunchRepository.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

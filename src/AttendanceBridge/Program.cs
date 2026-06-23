@@ -1,26 +1,30 @@
 using System;
 using System.IO;
-using System.Reflection;
+using System.Linq;
+using System.Threading;
 using AttendanceBridge.Config;
+using AttendanceBridge.Data;
 using AttendanceBridge.Device;
 using AttendanceBridge.Logging;
 
 namespace AttendanceBridge
 {
     /// <summary>
-    /// Phase 1 entry point. Runs as a console app that connects to the
-    /// TimeWatch device, prints its identity / configuration / record counts,
-    /// reads the device clock and (optionally) corrects drift.
+    /// Console entry point.
     ///
-    /// Later phases add the log poller, the MySQL writer and the local REST
-    /// listener, and a Windows-Service host. For now --console is the only mode.
+    ///   AttendanceBridge.exe info   - connect, print device info, sync clock (Phase 1)
+    ///   AttendanceBridge.exe pull   - connect, sync clock, pull logs into MySQL once (Phase 2)
+    ///   AttendanceBridge.exe poll   - keep pulling on an interval until Ctrl+C (Phase 2)
+    ///
+    /// No command defaults to "info". A Windows-Service host and the local REST
+    /// API arrive in Phase 3.
     /// </summary>
     internal static class Program
     {
+        private static volatile bool _stop;
+
         private static int Main(string[] args)
         {
-            // The native FKAttend DLLs are 32-bit. Fail fast and clearly rather
-            // than dying with BadImageFormatException deep inside interop.
             if (Environment.Is64BitProcess)
             {
                 Console.Error.WriteLine(
@@ -30,6 +34,7 @@ namespace AttendanceBridge
             }
 
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string command = args.FirstOrDefault(a => !a.StartsWith("--"))?.ToLowerInvariant() ?? "info";
             string configPath = ResolveConfigPath(baseDir, args);
 
             BridgeConfig cfg;
@@ -47,26 +52,31 @@ namespace AttendanceBridge
                 ? cfg.logging.directory
                 : Path.Combine(baseDir, cfg.logging.directory));
 
-            Log.Info("AttendanceBridge starting (Phase 1: connect + device info + time sync).");
+            Log.Info("AttendanceBridge starting. Command: " + command);
             Log.Info("Using config: " + configPath);
 
+            switch (command)
+            {
+                case "info": return RunInfo(cfg);
+                case "pull": return RunPull(cfg);
+                case "poll": return RunPoll(cfg);
+                default:
+                    Console.Error.WriteLine("Unknown command '" + command + "'. Use: info | pull | poll.");
+                    return 4;
+            }
+        }
+
+        // ---- info: Phase 1 behaviour ---------------------------------------
+        private static int RunInfo(BridgeConfig cfg)
+        {
             using (var conn = new DeviceConnection(cfg.device))
             {
-                if (!conn.Connect())
-                    return 1;
-
+                if (!conn.Connect()) return 1;
                 try
                 {
                     var info = new DeviceInfoModule(conn);
                     info.LogSnapshot(info.Read());
-
-                    var time = new TimeSyncModule(conn);
-                    if (cfg.timeSync.syncOnStartup)
-                        time.SyncIfDrift(cfg.timeSync.maxDriftSeconds);
-                    else
-                        Log.Info("Device clock: " +
-                                 time.ReadDeviceTime().ToString("yyyy-MM-dd HH:mm:ss") +
-                                 " (sync on startup disabled).");
+                    SyncClock(conn, cfg);
                 }
                 catch (Exception ex)
                 {
@@ -74,23 +84,144 @@ namespace AttendanceBridge
                     return 1;
                 }
             }
-
             Log.Info("Done.");
             return 0;
         }
 
-        // Config resolution order: --config <path> argument, else appsettings.json
-        // next to the exe, else the source tree copy (handy during development).
+        // ---- pull: one-shot log download into MySQL ------------------------
+        private static int RunPull(BridgeConfig cfg)
+        {
+            if (!RequireDatabase(cfg, out var repo)) return 5;
+
+            using (var conn = new DeviceConnection(cfg.device))
+            {
+                if (!conn.Connect()) return 1;
+                try
+                {
+                    SyncClock(conn, cfg);
+                    PullOnce(conn, cfg, repo);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("Pull failed.", ex);
+                    repo.WriteBridgeLog("ERROR", "pull", ex.Message);
+                    return 1;
+                }
+            }
+            Log.Info("Done.");
+            return 0;
+        }
+
+        // ---- poll: pull on an interval until Ctrl+C -------------------------
+        private static int RunPoll(BridgeConfig cfg)
+        {
+            if (!RequireDatabase(cfg, out var repo)) return 5;
+
+            Console.CancelKeyPress += (s, e) => { e.Cancel = true; _stop = true; Log.Info("Stop requested..."); };
+            Log.Info("Polling every " + cfg.poll.intervalSeconds + "s. Press Ctrl+C to stop.");
+
+            int backoff = 2;
+            using (var conn = new DeviceConnection(cfg.device))
+            {
+                while (!_stop)
+                {
+                    try
+                    {
+                        if (!conn.IsConnected && !conn.Connect())
+                        {
+                            Sleep(backoff);
+                            backoff = Math.Min(backoff * 2, 60); // exponential backoff, capped
+                            continue;
+                        }
+
+                        backoff = 2;
+                        PullOnce(conn, cfg, repo);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error("Poll iteration failed; will reconnect.", ex);
+                        repo.WriteBridgeLog("ERROR", "poll", ex.Message);
+                        conn.Disconnect(); // force a clean reconnect next loop
+                    }
+
+                    Sleep(cfg.poll.intervalSeconds);
+                }
+            }
+            Log.Info("Polling stopped.");
+            return 0;
+        }
+
+        // ---- shared helpers ------------------------------------------------
+
+        private static void PullOnce(DeviceConnection conn, BridgeConfig cfg, PunchRepository repo)
+        {
+            var pulledAt = DateTime.Now;
+            var poller = new LogPoller(conn);
+            var records = poller.Read(cfg.poll.readMark);
+
+            int inserted = repo.UpsertBatch(records);
+            DateTime? lastPunch = records.Count > 0 ? records.Max(r => r.PunchTime) : (DateTime?)null;
+
+            string status = "read " + records.Count + ", inserted " + inserted;
+            Log.Info("Pull complete: " + status + (records.Count - inserted > 0
+                ? " (" + (records.Count - inserted) + " already present)" : ""));
+
+            repo.UpdateDeviceCursor(pulledAt, lastPunch, status);
+            repo.WriteBridgeLog("INFO", "pull", status);
+
+            if (cfg.poll.emptyAfterPull && records.Count > 0)
+            {
+                Log.Warn("emptyAfterPull is enabled - clearing the device log now that records are saved.");
+                poller.EmptyLog();
+            }
+        }
+
+        private static void SyncClock(DeviceConnection conn, BridgeConfig cfg)
+        {
+            var time = new TimeSyncModule(conn);
+            if (cfg.timeSync.syncOnStartup)
+                time.SyncIfDrift(cfg.timeSync.maxDriftSeconds);
+            else
+                Log.Info("Device clock: " + time.ReadDeviceTime().ToString("yyyy-MM-dd HH:mm:ss") +
+                         " (sync disabled).");
+        }
+
+        private static bool RequireDatabase(BridgeConfig cfg, out PunchRepository repo)
+        {
+            repo = null;
+            if (!cfg.database.IsConfigured)
+            {
+                Console.Error.WriteLine(
+                    "database.connectionString is not set (or still contains CHANGE_ME). " +
+                    "Set it in appsettings.json before using pull/poll.");
+                return false;
+            }
+            repo = new PunchRepository(cfg.database.connectionString, cfg.database.deviceId);
+            try
+            {
+                repo.EnsureReachable();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("Cannot reach MySQL: " + ex.Message);
+                return false;
+            }
+            return true;
+        }
+
+        private static void Sleep(int seconds)
+        {
+            for (int i = 0; i < seconds * 10 && !_stop; i++)
+                Thread.Sleep(100); // responsive to Ctrl+C
+        }
+
+        // Config resolution: --config <path>, else appsettings.json next to exe.
         private static string ResolveConfigPath(string baseDir, string[] args)
         {
             for (int i = 0; i < args.Length - 1; i++)
                 if (string.Equals(args[i], "--config", StringComparison.OrdinalIgnoreCase))
                     return args[i + 1];
-
-            string next = Path.Combine(baseDir, "appsettings.json");
-            if (File.Exists(next)) return next;
-
-            return next; // returned even if missing so Load() can emit a helpful error
+            return Path.Combine(baseDir, "appsettings.json");
         }
     }
 }

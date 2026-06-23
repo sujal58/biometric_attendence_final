@@ -14,13 +14,46 @@ exposes a tiny localhost API for admin actions.
 
 ## Roadmap
 
-- **Phase 1 (current): connect + device info + time sync.** A console app that
+- **Phase 1 (done): connect + device info + time sync.** A console app that
   connects over TCP/IP, prints the device identity / configuration / record
   counts, reads the device clock and corrects drift.
-- **Phase 2: attendance log pull into MySQL** with idempotent de-duplication.
+- **Phase 2 (current): attendance log pull into MySQL** with idempotent
+  de-duplication.
 - **Phase 3: PHP consumption + a loopback REST API** the admin UI can trigger
   (test connection, sync time, pull now, read device info), plus a Windows
   Service host.
+
+## Commands
+
+```
+AttendanceBridge.exe info    connect, print device info, sync the clock (Phase 1)
+AttendanceBridge.exe pull    connect, sync clock, pull attendance logs into MySQL once
+AttendanceBridge.exe poll    keep pulling on an interval until Ctrl+C
+```
+
+`info` needs no database. `pull` / `poll` require `database.connectionString` in
+`appsettings.json`.
+
+## Database (Phase 2)
+
+Apply [db/schema.sql](db/schema.sql) to the MySQL database the PHP system uses
+(or a dedicated one it can read). It creates:
+
+| Table | Purpose |
+|---|---|
+| `bio_punch` | raw attendance punches (bridge writes, PHP reads) |
+| `bio_enroll_map` | maps a device `enroll_number` to a student/staff person |
+| `bio_device` | per-device connection details + last-pull health |
+| `bio_bridge_log` | the bridge's own operational log |
+
+The bridge pulls the **whole** log each cycle and relies on a unique
+`dedup_key = SHA1(device_id|enroll_number|punch_time|in_out_mode)` so re-pulls
+never create duplicates. It does **not** clear the device log unless
+`poll.emptyAfterPull` is set. `enroll_number` is the device-side id, not the
+student id — assign people in `bio_enroll_map`.
+
+Phase 2 adds the **MySqlConnector** NuGet package; restore happens automatically
+when you build the solution in Visual Studio.
 
 ## Requirements
 

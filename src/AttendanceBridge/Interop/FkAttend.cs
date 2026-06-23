@@ -89,5 +89,33 @@ namespace AttendanceBridge.Interop
             int anHandleIndex,
             int anDataIndex,
             [MarshalAs(UnmanagedType.LPStr)] ref string apstrValue);
+
+        // ---- Attendance (general) log -----------------------------------
+        // Usage: FK_LoadGeneralLogData loads the dataset into the SDK, then
+        // FK_GetTemperatureLogData / FK_GetGeneralLogData are called in a loop
+        // until they return RUNERR_DATAARRAY_END (-7). See frmLog.cs:911-952.
+
+        [DllImport(Dll, CharSet = CharSet.Ansi)]
+        public static extern int FK_LoadGeneralLogData(int anHandleIndex, int anReadMark);
+
+        [DllImport(Dll, CharSet = CharSet.Ansi)]
+        public static extern int FK_GetGeneralLogData(
+            int anHandleIndex,
+            ref int apnEnrollNumber,
+            ref int apnVerifyMode,
+            ref int apnInOutMode,
+            ref DateTime apnDateTime);
+
+        [DllImport(Dll, CharSet = CharSet.Ansi)]
+        public static extern int FK_GetTemperatureLogData(
+            int anHandleIndex,
+            ref int apnEnrollNumber,
+            ref int apnVerifyMode,
+            ref int apnInOutMode,
+            ref DateTime apnDateTime,
+            ref int apnTemperature);
+
+        [DllImport(Dll, CharSet = CharSet.Ansi)]
+        public static extern int FK_EmptyGeneralLogData(int anHandleIndex);
     }
 }

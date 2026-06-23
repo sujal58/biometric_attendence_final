@@ -12,6 +12,8 @@ namespace AttendanceBridge.Config
     {
         public DeviceConfig device { get; set; }
         public TimeSyncConfig timeSync { get; set; }
+        public DatabaseConfig database { get; set; }
+        public PollConfig poll { get; set; }
         public LoggingConfig logging { get; set; }
 
         public static BridgeConfig Load(string path)
@@ -35,9 +37,16 @@ namespace AttendanceBridge.Config
         {
             device = device ?? new DeviceConfig();
             timeSync = timeSync ?? new TimeSyncConfig();
+            database = database ?? new DatabaseConfig();
+            poll = poll ?? new PollConfig();
             logging = logging ?? new LoggingConfig();
             if (string.IsNullOrWhiteSpace(logging.directory))
                 logging.directory = "logs";
+            // Default the logical device id to the device's machine number.
+            if (database.deviceId <= 0)
+                database.deviceId = device.machineNo;
+            if (poll.intervalSeconds <= 0)
+                poll.intervalSeconds = 60;
         }
 
         private void Validate()
@@ -66,6 +75,27 @@ namespace AttendanceBridge.Config
     {
         public bool syncOnStartup { get; set; } = true;
         public int maxDriftSeconds { get; set; } = 30;
+    }
+
+    public sealed class DatabaseConfig
+    {
+        /// <summary>MySQL connection string, e.g. "Server=localhost;Port=3306;Database=school;Uid=bridge;Pwd=...;".</summary>
+        public string connectionString { get; set; } = "";
+        /// <summary>Logical device id used in bio_punch / bio_device. Defaults to device.machineNo.</summary>
+        public int deviceId { get; set; } = 0;
+
+        public bool IsConfigured =>
+            !string.IsNullOrWhiteSpace(connectionString) &&
+            !connectionString.Contains("CHANGE_ME");
+    }
+
+    public sealed class PollConfig
+    {
+        public int intervalSeconds { get; set; } = 60;
+        /// <summary>0 = read all logs (recommended; dedup in DB), 1 = only unread.</summary>
+        public int readMark { get; set; } = 0;
+        /// <summary>Clear the device log after a successful pull. Leave false for safety.</summary>
+        public bool emptyAfterPull { get; set; } = false;
     }
 
     public sealed class LoggingConfig
