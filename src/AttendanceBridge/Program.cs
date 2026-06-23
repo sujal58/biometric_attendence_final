@@ -200,10 +200,13 @@ namespace AttendanceBridge
             try
             {
                 repo.EnsureReachable();
+                // Auto-create the bio_* tables if they don't exist yet.
+                SchemaInitializer.EnsureSchema(cfg.database.connectionString);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine("Cannot reach MySQL: " + ex.Message);
+                Console.Error.WriteLine("Cannot reach MySQL or set up the schema: " + ex.Message);
+                Console.Error.WriteLine("(The database named in the connection string must already exist.)");
                 return false;
             }
             return true;

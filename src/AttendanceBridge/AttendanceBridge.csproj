@@ -31,6 +31,14 @@
     <PackageReference Include="MySqlConnector" Version="2.6.0" />
   </ItemGroup>
 
+  <!-- The schema is embedded so the bridge can auto-create the bio_* tables at
+       runtime (CREATE TABLE IF NOT EXISTS). Single source of truth = db/schema.sql. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\db\schema.sql">
+      <LogicalName>AttendanceBridge.schema.sql</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <!-- Native TimeWatch SDK DLLs: copied next to the exe so FKAttend.dll and its
        dependencies resolve at runtime. (Outside the project folder, so not picked
        up by the default glob.) -->

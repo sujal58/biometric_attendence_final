@@ -36,8 +36,15 @@ AttendanceBridge.exe poll    keep pulling on an interval until Ctrl+C
 
 ## Database (Phase 2)
 
-Apply [db/schema.sql](db/schema.sql) to the MySQL database the PHP system uses
-(or a dedicated one it can read). It creates:
+The bridge **auto-creates its tables** on the first `pull` / `poll` (it runs the
+bundled schema with `CREATE TABLE IF NOT EXISTS`). You only need to:
+
+1. Make sure the **database** named in `database.connectionString` already
+   exists (the bridge creates tables, not the database).
+2. Point `database.connectionString` at it.
+
+Applying [db/schema.sql](db/schema.sql) by hand is optional (kept as the single
+source of truth and for manual setup). It creates:
 
 | Table | Purpose |
 |---|---|
