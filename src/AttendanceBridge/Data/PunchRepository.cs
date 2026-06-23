@@ -48,8 +48,10 @@ namespace AttendanceBridge.Data
                 {
                     const string sql =
                         "INSERT INTO bio_punch " +
-                        "(device_id, enroll_number, punch_time, verify_mode, in_out_mode, dedup_key, raw_temperature) " +
-                        "VALUES (@dev, @enroll, @time, @verify, @io, @key, @temp) " +
+                        "(device_id, enroll_number, punch_time, verify_mode, verify_label, " +
+                        " in_out_mode, io_mode, door_mode, dedup_key, raw_temperature) " +
+                        "VALUES (@dev, @enroll, @time, @verify, @verifyLabel, " +
+                        " @io, @ioMode, @doorMode, @key, @temp) " +
                         "ON DUPLICATE KEY UPDATE id = id;"; // no-op on repeat
 
                     foreach (var r in records)
@@ -60,7 +62,10 @@ namespace AttendanceBridge.Data
                             cmd.Parameters.AddWithValue("@enroll", r.EnrollNumber);
                             cmd.Parameters.AddWithValue("@time", r.PunchTime);
                             cmd.Parameters.AddWithValue("@verify", r.VerifyMode);
+                            cmd.Parameters.AddWithValue("@verifyLabel", (object)r.VerifyLabel ?? DBNull.Value);
                             cmd.Parameters.AddWithValue("@io", r.InOutMode);
+                            cmd.Parameters.AddWithValue("@ioMode", r.IoMode);
+                            cmd.Parameters.AddWithValue("@doorMode", r.DoorMode);
                             cmd.Parameters.AddWithValue("@key",
                                 Dedup.Key(_deviceId, r.EnrollNumber, r.PunchTime, r.InOutMode));
                             cmd.Parameters.AddWithValue("@temp",

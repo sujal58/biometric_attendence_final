@@ -157,7 +157,7 @@ namespace AttendanceBridge
         {
             var pulledAt = DateTime.Now;
             var poller = new LogPoller(conn);
-            var records = poller.Read(cfg.poll.readMark);
+            var records = poller.Read(cfg.poll.readMark, cfg.poll.verbose);
 
             int inserted = repo.UpsertBatch(records);
             DateTime? lastPunch = records.Count > 0 ? records.Max(r => r.PunchTime) : (DateTime?)null;

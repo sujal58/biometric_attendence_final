@@ -98,6 +98,8 @@ namespace AttendanceBridge.Config
         public int readMark { get; set; } = 0;
         /// <summary>Clear the device log after a successful pull. Leave false for safety.</summary>
         public bool emptyAfterPull { get; set; } = false;
+        /// <summary>Log each decoded record as it is read (handy for verifying data).</summary>
+        public bool verbose { get; set; } = false;
     }
 
     public sealed class LoggingConfig

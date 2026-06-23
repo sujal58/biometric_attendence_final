@@ -26,7 +26,8 @@ namespace AttendanceBridge.Device
 
         /// <param name="readMark">0 = read all logs (recommended; dedup happens
         /// in the DB), 1 = only records not yet marked read.</param>
-        public List<PunchRecord> Read(int readMark)
+        /// <param name="verbose">log each decoded record as it is read.</param>
+        public List<PunchRecord> Read(int readMark, bool verbose = false)
         {
             _conn.EnsureConnected();
             var records = new List<PunchRecord>();
@@ -70,14 +71,19 @@ namespace AttendanceBridge.Device
                             "Reading attendance log failed with " + DeviceConnection.Describe(r));
                     }
 
-                    records.Add(new PunchRecord
+                    var record = new PunchRecord
                     {
                         EnrollNumber = enroll,
                         VerifyMode = verify,
                         InOutMode = inOut,
                         PunchTime = when,
                         Temperature = hasTemp ? (int?)temp : null,
-                    });
+                    };
+                    record.Decode();
+                    records.Add(record);
+
+                    if (verbose)
+                        Log.Info("  " + record);
                 }
             }
 

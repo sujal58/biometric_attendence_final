@@ -8,8 +8,11 @@ CREATE TABLE IF NOT EXISTS bio_punch (
   device_id       INT NOT NULL,
   enroll_number   INT NOT NULL,                 -- device-side user id (NOT the student id)
   punch_time      DATETIME NOT NULL,
-  verify_mode     SMALLINT NOT NULL,            -- raw FK verify code (see FkEnums.VerifyMode)
-  in_out_mode     SMALLINT NOT NULL,            -- raw FK in/out code (see FkEnums.IoMode)
+  verify_mode     INT NOT NULL,                 -- raw FK verify code (bit-packed on newer firmware)
+  verify_label    VARCHAR(64) NULL,             -- decoded, e.g. 'FP', 'FACE', 'Card+FP'
+  in_out_mode     INT NOT NULL,                 -- raw FK in/out code (low byte = io, high bytes = door)
+  io_mode         INT NOT NULL DEFAULT 0,       -- decoded in/out (low byte of in_out_mode)
+  door_mode       INT NOT NULL DEFAULT 0,       -- decoded door mode (high bytes of in_out_mode)
   dedup_key       CHAR(40) NOT NULL,            -- SHA1(device_id|enroll|punch_time|in_out_mode)
   raw_temperature SMALLINT NULL,                -- tenths of a degree, or NULL if unsupported
   processed       TINYINT NOT NULL DEFAULT 0,   -- set by the PHP attendance engine
