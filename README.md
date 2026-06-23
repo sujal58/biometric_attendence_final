@@ -69,15 +69,24 @@ Outputs `scripts/publish/` = one `AttendanceBridge.exe` (self-contained, bundles
 the .NET runtime) + the native DLLs + `appsettings.example.json`. The only PC
 prerequisite is the **Visual C++ x86 runtime**.
 
-## Install at a school (your team, once, as admin)
+## Install at a school (no terminal needed)
 
+**Recommended — double-click installer.** Build `ShikzyaAgentSetup.exe` once
+(see [installer/](installer/)); the school double-clicks it, pastes the site
+token (or it's pre-filled), clicks Next, and the service installs + starts. For
+unattended/remote installs it also runs silently:
 ```
-powershell -ExecutionPolicy Bypass -File scripts/install-agent.ps1 `
-    -SiteToken "<per-school-token>" -ApiBaseUrl "https://app.shikzya.com"
+ShikzyaAgentSetup.exe /VERYSILENT /token=<siteToken> /apiurl=https://app.shikzya.com
 ```
-This writes the pre-keyed `appsettings.json`, installs the **`AttendanceBridge`
-Windows Service** (auto-start, restart-on-failure), and starts it. Remove with
-`scripts/uninstall-agent.ps1`.
+
+**Equivalent one-liners** (the installer just calls these; run as Administrator):
+```
+AttendanceBridge.exe install --token <siteToken> --api https://app.shikzya.com
+AttendanceBridge.exe uninstall
+```
+Either way it writes the pre-keyed `appsettings.json` and registers the
+**`AttendanceBridge`** Windows Service (auto-start, restart-on-failure). A
+PowerShell variant is in `scripts/install-agent.ps1`.
 
 The agent's only local config is the API URL + site token:
 ```json

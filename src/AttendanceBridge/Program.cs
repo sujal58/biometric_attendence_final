@@ -27,8 +27,15 @@ namespace AttendanceBridge
                 return 2;
             }
 
-            if (args.Length > 0 && args[0].Equals("test", StringComparison.OrdinalIgnoreCase))
-                return RunTest(args);
+            if (args.Length > 0)
+            {
+                switch (args[0].ToLowerInvariant())
+                {
+                    case "test": return RunTest(args);
+                    case "install": return ServiceInstaller.Install(args);
+                    case "uninstall": return ServiceInstaller.Uninstall(args);
+                }
+            }
 
             string baseDir = AppContext.BaseDirectory;
             string cfgPath = ResolveConfigPath(baseDir, args);
