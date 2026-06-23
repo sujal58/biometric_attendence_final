@@ -37,13 +37,15 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <!-- MySqlConnector's types derive from System.Data.Common base classes. -->
+    <Reference Include="System.Data" />
     <!-- JavaScriptSerializer (config parsing) lives here; framework assembly, no NuGet. -->
     <Reference Include="System.Web.Extensions" />
   </ItemGroup>
   <!-- MySqlConnector (Phase 2). Uses PackageReference so VS/NuGet restores the
        full transitive dependency chain automatically on the build machine. -->
   <ItemGroup>
-    <PackageReference Include="MySqlConnector" Version="2.3.7" />
+    <PackageReference Include="MySqlConnector" Version="2.6.0" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
