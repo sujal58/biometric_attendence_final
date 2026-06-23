@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Attendance Bridge</title>
+  <style>
+    :root { --bg:#0f172a; --card:#1e293b; --txt:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --ok:#22c55e; --err:#ef4444; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: Segoe UI, Roboto, system-ui, sans-serif; background:var(--bg); color:var(--txt); }
+    .wrap { max-width: 640px; margin: 6vh auto; padding: 0 16px; }
+    .card { background:var(--card); border-radius:14px; padding:24px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
+    h1 { margin:0 0 4px; font-size:22px; }
+    .sub { color:var(--muted); margin-bottom:20px; font-size:14px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:18px 0; }
+    .stat { background:#0b1220; border-radius:10px; padding:12px 14px; }
+    .stat .k { color:var(--muted); font-size:12px; }
+    .stat .v { font-size:18px; margin-top:2px; }
+    button { background:var(--accent); color:#04263a; border:0; border-radius:10px; padding:14px 18px;
+             font-size:16px; font-weight:600; cursor:pointer; width:100%; }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .msg { margin-top:14px; min-height:20px; font-size:14px; }
+    .ok { color:var(--ok); } .err { color:var(--err); }
+    .foot { color:var(--muted); font-size:12px; margin-top:18px; text-align:center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Attendance Bridge</h1>
+      <div class="sub">School: <b>{{TENANT}}</b> &middot; Device #<b>{{DEVICE}}</b></div>
+
+      <div class="grid">
+        <div class="stat"><div class="k">Punches today</div><div class="v" id="today">-</div></div>
+        <div class="stat"><div class="k">Total punches</div><div class="v" id="total">-</div></div>
+        <div class="stat"><div class="k">Last fetch</div><div class="v" id="lastPull">-</div></div>
+        <div class="stat"><div class="k">Latest punch</div><div class="v" id="lastPunch">-</div></div>
+      </div>
+
+      <button id="fetchBtn" onclick="doFetch()">Fetch attendance from machine</button>
+      <div class="msg" id="msg"></div>
+      <div class="foot" id="status">Connecting...</div>
+    </div>
+  </div>
+
+  <script>
+    function fmt(v){ return v ? v : '-'; }
+
+    async function refresh(){
+      try {
+        const r = await fetch('/api/status');
+        const s = await r.json();
+        if (s.ok) {
+          document.getElementById('today').textContent = s.todayPunches;
+          document.getElementById('total').textContent = s.totalPunches;
+          document.getElementById('lastPull').textContent = fmt(s.lastPullAt);
+          document.getElementById('lastPunch').textContent = fmt(s.lastPunchAt);
+          document.getElementById('status').textContent =
+            'Device ' + s.deviceIp + ' • ' + fmt(s.lastStatus);
+        } else {
+          document.getElementById('status').textContent = 'Status error: ' + s.error;
+        }
+      } catch (e) {
+        document.getElementById('status').textContent = 'Bridge not reachable.';
+      }
+    }
+
+    async function doFetch(){
+      const btn = document.getElementById('fetchBtn');
+      const msg = document.getElementById('msg');
+      btn.disabled = true; msg.className = 'msg'; msg.textContent = 'Fetching from the machine...';
+      try {
+        const r = await fetch('/api/fetch', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+          msg.className = 'msg ok';
+          msg.textContent = 'Done: read ' + d.read + ', new ' + d.inserted + '.';
+        } else {
+          msg.className = 'msg err';
+          msg.textContent = 'Failed: ' + (d.message || 'unknown error');
+        }
+      } catch (e) {
+        msg.className = 'msg err'; msg.textContent = 'Request failed.';
+      } finally {
+        btn.disabled = false; refresh();
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 10000);
+  </script>
+</body>
+</html>

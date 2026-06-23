@@ -12,6 +12,16 @@ namespace AttendanceBridge.Data
         public string RequestedBy;
     }
 
+    /// <summary>Snapshot shown by the local web UI / status endpoint.</summary>
+    public sealed class BridgeStatus
+    {
+        public DateTime? LastPullAt;
+        public DateTime? LastPunchAt;
+        public string LastStatus;
+        public long TotalPunches;
+        public long TodayPunches;
+    }
+
     /// <summary>
     /// Writes punches into MySQL and services the on-demand fetch queue. Inserts
     /// are idempotent: a UNIQUE index on bio_punch.dedup_key plus
@@ -215,6 +225,46 @@ namespace AttendanceBridge.Data
                     cmd.ExecuteNonQuery();
                 }
             }
+        }
+
+        /// <summary>Reads the device cursor + punch counts for the status panel.</summary>
+        public BridgeStatus GetStatus()
+        {
+            var st = new BridgeStatus();
+            using (var conn = new MySqlConnection(_connectionString))
+            {
+                conn.Open();
+
+                using (var cmd = new MySqlCommand(
+                    "SELECT last_pull_at, last_punch_at, last_status FROM bio_device " +
+                    "WHERE tenant_id = @t AND device_id = @d;", conn))
+                {
+                    cmd.Parameters.AddWithValue("@t", _tenantId);
+                    cmd.Parameters.AddWithValue("@d", _deviceId);
+                    using (var r = cmd.ExecuteReader())
+                        if (r.Read())
+                        {
+                            st.LastPullAt = r.IsDBNull(0) ? (DateTime?)null : r.GetDateTime(0);
+                            st.LastPunchAt = r.IsDBNull(1) ? (DateTime?)null : r.GetDateTime(1);
+                            st.LastStatus = r.IsDBNull(2) ? null : r.GetString(2);
+                        }
+                }
+
+                using (var cmd = new MySqlCommand(
+                    "SELECT COUNT(*), SUM(punch_time >= CURDATE()) FROM bio_punch " +
+                    "WHERE tenant_id = @t AND device_id = @d;", conn))
+                {
+                    cmd.Parameters.AddWithValue("@t", _tenantId);
+                    cmd.Parameters.AddWithValue("@d", _deviceId);
+                    using (var r = cmd.ExecuteReader())
+                        if (r.Read())
+                        {
+                            st.TotalPunches = r.IsDBNull(0) ? 0 : r.GetInt64(0);
+                            st.TodayPunches = r.IsDBNull(1) ? 0 : Convert.ToInt64(r.GetValue(1));
+                        }
+                }
+            }
+            return st;
         }
 
         private static string Trim(string s, int max) =>

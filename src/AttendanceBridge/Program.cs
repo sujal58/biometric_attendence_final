@@ -5,6 +5,7 @@ using System.Threading;
 using AttendanceBridge.Config;
 using AttendanceBridge.Data;
 using AttendanceBridge.Device;
+using AttendanceBridge.Http;
 using AttendanceBridge.Logging;
 
 namespace AttendanceBridge
@@ -16,9 +17,10 @@ namespace AttendanceBridge
     ///   AttendanceBridge.exe pull   - connect, sync clock, pull logs into MySQL once
     ///   AttendanceBridge.exe poll   - keep pulling on a fixed interval until Ctrl+C
     ///   AttendanceBridge.exe serve  - unattended agent: scheduled pulls + on-demand
-    ///                                 fetch commands from Shikzya (run via Task Scheduler)
+    ///                                 fetch commands from Shikzya + local web UI
+    ///                                 (run via Task Scheduler at boot)
     ///
-    /// No command defaults to "info". The local web UI is hosted by `serve`.
+    /// No command defaults to "info".
     /// </summary>
     internal static class Program
     {
@@ -68,7 +70,7 @@ namespace AttendanceBridge
             }
         }
 
-        // ---- info: Phase 1 behaviour ---------------------------------------
+        // ---- info: connect, device info, time sync (no DB) -----------------
         private static int RunInfo(BridgeConfig cfg)
         {
             using (var conn = new DeviceConnection(cfg.device))
@@ -78,7 +80,13 @@ namespace AttendanceBridge
                 {
                     var info = new DeviceInfoModule(conn);
                     info.LogSnapshot(info.Read());
-                    SyncClock(conn, cfg);
+
+                    var time = new TimeSyncModule(conn);
+                    if (cfg.timeSync.syncOnStartup)
+                        time.SyncIfDrift(cfg.timeSync.maxDriftSeconds);
+                    else
+                        Log.Info("Device clock: " + time.ReadDeviceTime().ToString("yyyy-MM-dd HH:mm:ss") +
+                                 " (sync disabled).");
                 }
                 catch (Exception ex)
                 {
@@ -94,27 +102,15 @@ namespace AttendanceBridge
         private static int RunPull(BridgeConfig cfg)
         {
             if (!RequireDatabase(cfg, out var repo)) return 5;
-
-            using (var conn = new DeviceConnection(cfg.device))
+            using (var fetch = new FetchService(cfg, repo))
             {
-                if (!conn.Connect()) return 1;
-                try
-                {
-                    SyncClock(conn, cfg);
-                    PullOnce(conn, cfg, repo);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error("Pull failed.", ex);
-                    repo.WriteBridgeLog("ERROR", "pull", ex.Message);
-                    return 1;
-                }
+                var r = fetch.Fetch("manual pull");
+                Log.Info("Done.");
+                return r.Ok ? 0 : 1;
             }
-            Log.Info("Done.");
-            return 0;
         }
 
-        // ---- poll: pull on an interval until Ctrl+C -------------------------
+        // ---- poll: pull on a fixed interval until Ctrl+C -------------------
         private static int RunPoll(BridgeConfig cfg)
         {
             if (!RequireDatabase(cfg, out var repo)) return 5;
@@ -122,30 +118,11 @@ namespace AttendanceBridge
             Console.CancelKeyPress += (s, e) => { e.Cancel = true; _stop = true; Log.Info("Stop requested..."); };
             Log.Info("Polling every " + cfg.poll.intervalSeconds + "s. Press Ctrl+C to stop.");
 
-            int backoff = 2;
-            using (var conn = new DeviceConnection(cfg.device))
+            using (var fetch = new FetchService(cfg, repo))
             {
                 while (!_stop)
                 {
-                    try
-                    {
-                        if (!conn.IsConnected && !conn.Connect())
-                        {
-                            Sleep(backoff);
-                            backoff = Math.Min(backoff * 2, 60); // exponential backoff, capped
-                            continue;
-                        }
-
-                        backoff = 2;
-                        PullOnce(conn, cfg, repo);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error("Poll iteration failed; will reconnect.", ex);
-                        repo.WriteBridgeLog("ERROR", "poll", ex.Message);
-                        conn.Disconnect(); // force a clean reconnect next loop
-                    }
-
+                    fetch.Fetch("poll");
                     Sleep(cfg.poll.intervalSeconds);
                 }
             }
@@ -153,34 +130,7 @@ namespace AttendanceBridge
             return 0;
         }
 
-        // ---- shared helpers ------------------------------------------------
-
-        private static PullResult PullOnce(DeviceConnection conn, BridgeConfig cfg, PunchRepository repo)
-        {
-            var pulledAt = DateTime.Now;
-            var poller = new LogPoller(conn);
-            var records = poller.Read(cfg.poll.readMark, cfg.poll.verbose);
-
-            int inserted = repo.UpsertBatch(records);
-            DateTime? lastPunch = records.Count > 0 ? records.Max(r => r.PunchTime) : (DateTime?)null;
-
-            string status = "read " + records.Count + ", inserted " + inserted;
-            Log.Info("Pull complete: " + status + (records.Count - inserted > 0
-                ? " (" + (records.Count - inserted) + " already present)" : ""));
-
-            repo.UpdateDeviceCursor(pulledAt, lastPunch, status);
-            repo.WriteBridgeLog("INFO", "pull", status);
-
-            if (cfg.poll.emptyAfterPull && records.Count > 0)
-            {
-                Log.Warn("emptyAfterPull is enabled - clearing the device log now that records are saved.");
-                poller.EmptyLog();
-            }
-
-            return new PullResult { Read = records.Count, Inserted = inserted };
-        }
-
-        // ---- serve: unattended agent (scheduled pulls + on-demand commands) -
+        // ---- serve: unattended agent (schedule + commands + web UI) --------
         private static int RunServe(BridgeConfig cfg)
         {
             if (!RequireDatabase(cfg, out var repo)) return 5;
@@ -195,75 +145,50 @@ namespace AttendanceBridge
             var scheduler = new DailyScheduler(cfg.schedule.pullTimes);
             int tick = cfg.command.enabled ? cfg.command.pollSeconds : 30;
 
-            using (var conn = new DeviceConnection(cfg.device))
+            using (var fetch = new FetchService(cfg, repo))
             {
-                if (cfg.schedule.catchUpOnStart)
-                    SafePull(conn, cfg, repo, "startup", null);
-
-                while (!_stop)
+                LocalHttpServer web = null;
+                if (cfg.web.enabled)
                 {
-                    foreach (var due in scheduler.DueNow(DateTime.Now))
-                        SafePull(conn, cfg, repo, "schedule " + due, null);
+                    web = new LocalHttpServer(cfg, repo, fetch);
+                    web.Start();
+                }
 
-                    if (cfg.command.enabled)
+                try
+                {
+                    if (cfg.schedule.catchUpOnStart)
+                        fetch.Fetch("startup");
+
+                    while (!_stop)
                     {
-                        FetchCommand cmd;
-                        while (!_stop && (cmd = TryClaim(repo)) != null)
-                            SafePull(conn, cfg, repo, "command#" + cmd.Id, cmd);
-                    }
+                        foreach (var due in scheduler.DueNow(DateTime.Now))
+                            fetch.Fetch("schedule " + due);
 
-                    Sleep(tick);
+                        if (cfg.command.enabled)
+                        {
+                            FetchCommand cmd;
+                            while (!_stop && (cmd = TryClaim(repo)) != null)
+                                fetch.Fetch("command#" + cmd.Id, cmd);
+                        }
+
+                        Sleep(tick);
+                    }
+                }
+                finally
+                {
+                    web?.Dispose();
                 }
             }
             Log.Info("Agent stopped.");
             return 0;
         }
 
-        // Connects if needed, syncs the clock on a fresh connect, pulls, and (if the
-        // pull was triggered by a Shikzya command) reports the result back to the queue.
-        private static void SafePull(DeviceConnection conn, BridgeConfig cfg, PunchRepository repo, string reason, FetchCommand cmd)
-        {
-            Log.Info("Pull trigger: " + reason);
-            try
-            {
-                if (!conn.IsConnected)
-                {
-                    if (!conn.Connect())
-                    {
-                        if (cmd != null) repo.CompleteCommand(cmd.Id, false, 0, 0, "device connect failed");
-                        return;
-                    }
-                    SyncClock(conn, cfg); // only right after a fresh connect
-                }
-
-                var res = PullOnce(conn, cfg, repo);
-                if (cmd != null)
-                    repo.CompleteCommand(cmd.Id, true, res.Read, res.Inserted,
-                        "read " + res.Read + ", inserted " + res.Inserted);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("Pull failed (" + reason + ").", ex);
-                repo.WriteBridgeLog("ERROR", "pull", ex.Message);
-                if (cmd != null) repo.CompleteCommand(cmd.Id, false, 0, 0, ex.Message);
-                conn.Disconnect(); // force a clean reconnect next time
-            }
-        }
+        // ---- shared helpers ------------------------------------------------
 
         private static FetchCommand TryClaim(PunchRepository repo)
         {
             try { return repo.ClaimNextCommand(); }
             catch (Exception ex) { Log.Warn("Could not poll fetch commands: " + ex.Message); return null; }
-        }
-
-        private static void SyncClock(DeviceConnection conn, BridgeConfig cfg)
-        {
-            var time = new TimeSyncModule(conn);
-            if (cfg.timeSync.syncOnStartup)
-                time.SyncIfDrift(cfg.timeSync.maxDriftSeconds);
-            else
-                Log.Info("Device clock: " + time.ReadDeviceTime().ToString("yyyy-MM-dd HH:mm:ss") +
-                         " (sync disabled).");
         }
 
         private static bool RequireDatabase(BridgeConfig cfg, out PunchRepository repo)
@@ -273,14 +198,13 @@ namespace AttendanceBridge
             {
                 Console.Error.WriteLine(
                     "database.connectionString is not set (or still contains CHANGE_ME). " +
-                    "Set it in appsettings.json before using pull/poll.");
+                    "Set it in appsettings.json before using pull/poll/serve.");
                 return false;
             }
             repo = new PunchRepository(cfg.database.connectionString, cfg.tenant.tenantId, cfg.database.deviceId);
             try
             {
                 repo.EnsureReachable();
-                // Auto-create the bio_* tables if they don't exist yet.
                 SchemaInitializer.EnsureSchema(cfg.database.connectionString);
             }
             catch (Exception ex)
@@ -314,15 +238,8 @@ namespace AttendanceBridge
             foreach (var c in candidates)
                 if (File.Exists(c)) return c;
 
-            // Return the primary location so the not-found error names where to put it.
             return candidates[0];
         }
-    }
-
-    internal sealed class PullResult
-    {
-        public int Read;
-        public int Inserted;
     }
 
     /// <summary>

@@ -39,6 +39,14 @@
     </EmbeddedResource>
   </ItemGroup>
 
+  <!-- The school-facing web page is embedded and served by the `serve` agent. -->
+  <ItemGroup>
+    <None Remove="webui.html" />
+    <EmbeddedResource Include="webui.html">
+      <LogicalName>AttendanceBridge.webui.html</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <!-- Native TimeWatch SDK DLLs: copied next to the exe so FKAttend.dll and its
        dependencies resolve at runtime. (Outside the project folder, so not picked
        up by the default glob.) -->
