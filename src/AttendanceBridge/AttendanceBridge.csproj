@@ -9,6 +9,9 @@
     <PlatformTarget>x86</PlatformTarget>
     <Platforms>x86</Platforms>
     <SelfContained>true</SelfContained>
+    <!-- Bundle the native device DLLs into the single .exe (extracted at run time)
+         so a single-file publish is literally one file - pendrive-friendly. -->
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <RootNamespace>AttendanceBridge</RootNamespace>
     <AssemblyName>AttendanceBridge</AssemblyName>
     <Nullable>disable</Nullable>

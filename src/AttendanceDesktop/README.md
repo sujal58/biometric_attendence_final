@@ -1,8 +1,14 @@
 # Shikzya Device Tool (desktop)
 
-A simple **double-click desktop app** for schools and technicians. No install, no
-service — copy the folder, run `ShikzyaDeviceTool.exe`. The PC must be on the
-**same network as the device** (it talks to the device via the 32-bit SDK).
+A simple **double-click desktop app** for schools and technicians. It builds to a
+**single self-contained `ShikzyaDeviceTool.exe`** — carry it on a pendrive, copy it
+to any Windows desktop, double-click. No install, no service, and **no
+prerequisites**: the .NET runtime *and* the native device DLLs are bundled inside
+the one file (the native DLLs use only standard Windows system libraries — no VC++
+redistributable needed; verify on a clean PC to be sure).
+
+The PC must be on the **same network as the device** (it talks to the device via
+the 32-bit SDK).
 
 ## What it does
 
@@ -22,8 +28,8 @@ service — copy the folder, run `ShikzyaDeviceTool.exe`. The PC must be on the
 ```
 powershell -File scripts\publish-desktop.ps1
 ```
-Output: `scripts\publish-desktop\ShikzyaDeviceTool.exe` + the native DLLs. Copy
-that folder to the school PC. Prerequisite on the PC: the **Visual C++ x86 runtime**.
+Output: a single `scripts\publish-desktop\ShikzyaDeviceTool.exe` (everything bundled
+inside). Copy just that one file to the school PC / a pendrive and double-click it.
 
 ## When to use which
 

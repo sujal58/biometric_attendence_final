@@ -44,4 +44,5 @@ AttendanceBridge.exe install --token <siteToken> --api <url>
 AttendanceBridge.exe uninstall
 ```
 So even without Inno Setup, installation is a single command (run as Administrator).
-The only PC prerequisite is the **Visual C++ x86 runtime**.
+The agent is a single self-contained `.exe` (runtime + native DLLs bundled) with no
+prerequisites beyond Windows.

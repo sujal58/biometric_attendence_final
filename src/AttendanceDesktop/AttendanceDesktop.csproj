@@ -7,6 +7,9 @@
     <PlatformTarget>x86</PlatformTarget>
     <Platforms>x86</Platforms>
     <SelfContained>true</SelfContained>
+    <!-- Bundle the native device DLLs into the single .exe (extracted at run time)
+         so the school gets one pendrive-friendly file. -->
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>

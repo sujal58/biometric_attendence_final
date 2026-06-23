@@ -76,9 +76,10 @@ dotnet run --project src/AttendanceBridge -- test --ip 192.168.1.33 --license 12
 ```
 powershell -File scripts/publish.ps1
 ```
-Outputs `scripts/publish/` = one `AttendanceBridge.exe` (self-contained, bundles
-the .NET runtime) + the native DLLs + `appsettings.example.json`. The only PC
-prerequisite is the **Visual C++ x86 runtime**.
+Outputs a single self-contained `AttendanceBridge.exe` — the .NET runtime *and*
+the native device DLLs are bundled inside the one file (extracted at run time).
+**No prerequisites** beyond Windows: the native DLLs reference only standard system
+libraries (no VC++ redistributable; verify on a clean PC). Pendrive-friendly.
 
 ## Install at a school (no terminal needed)
 
