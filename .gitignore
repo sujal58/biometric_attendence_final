@@ -18,7 +18,9 @@ spool/
 
 # Publish output (the deployable agent is built, not committed)
 scripts/publish/
+scripts/publish-desktop/
 installer/Output/
+desktop-settings.json
 
 # OS
 Thumbs.db

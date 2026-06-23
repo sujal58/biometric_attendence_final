@@ -38,11 +38,22 @@ Shikzya (cloud, multi-tenant)
 See [docs/phase4-fleet.md](docs/phase4-fleet.md) for the architecture and the full
 API contract.
 
+## Two ways to run on a school PC (both push to the same API)
+
+- **Desktop tool** ([src/AttendanceDesktop/](src/AttendanceDesktop/)) — a
+  double-click app: staff open it, see device info/status, and Fetch (auto on open
+  + button). No install, no service. Simplest; manual.
+- **Headless agent / service** ([installer/](installer/)) — unattended: scheduled
+  pulls + on-demand fetch from Shikzya, runs in the background. Hands-off.
+
+Both are built from the same proven device code; pick per site.
+
 ## Repo layout
 
 | Path | What |
 |---|---|
-| `src/AttendanceBridge/` | the agent (.NET 8, win-x86) |
+| `src/AttendanceBridge/` | the headless agent / service (.NET 8, win-x86) |
+| `src/AttendanceDesktop/` | the double-click desktop tool (school + technician) |
 | `native/` | the 6 TimeWatch native DLLs (copied next to the exe) |
 | `db/schema.sql` | Shikzya server-side tables |
 | `examples/shikzya/api/` | reference PHP for the agent-facing HTTPS API |

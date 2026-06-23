@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
+    <PlatformTarget>x86</PlatformTarget>
+    <Platforms>x86</Platforms>
+    <SelfContained>true</SelfContained>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>AttendanceDesktop</RootNamespace>
+    <AssemblyName>ShikzyaDeviceTool</AssemblyName>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+  </PropertyGroup>
+
+  <!-- Reuse the proven device/interop/api/logging/data code from the agent. -->
+  <ItemGroup>
+    <Compile Include="..\AttendanceBridge\Interop\**\*.cs" />
+    <Compile Include="..\AttendanceBridge\Device\**\*.cs" />
+    <Compile Include="..\AttendanceBridge\Data\**\*.cs" />
+    <Compile Include="..\AttendanceBridge\Api\**\*.cs" />
+    <Compile Include="..\AttendanceBridge\Logging\**\*.cs" />
+  </ItemGroup>
+
+  <!-- Native TimeWatch SDK DLLs copied next to the exe. -->
+  <ItemGroup>
+    <Content Include="..\..\native\*.dll">
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
