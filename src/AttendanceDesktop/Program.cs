@@ -1,5 +1,6 @@
 using System;
 using System.Windows.Forms;
+using AttendanceDesktop.Activation;
 
 namespace AttendanceDesktop
 {
@@ -16,7 +17,19 @@ namespace AttendanceDesktop
             }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new MainForm());
+
+            var cfg = DesktopConfig.Load();
+
+            // License gate: validate online (or use the offline grace cache). If not
+            // activated, show the activation screen; exit if the user can't activate.
+            var gate = LicenseGate.CheckAsync(cfg).GetAwaiter().GetResult();
+            if (!gate.Allowed)
+            {
+                using var act = new ActivationForm(cfg);
+                if (act.ShowDialog() != DialogResult.OK) return;
+            }
+
+            Application.Run(new MainForm(cfg));
         }
     }
 }

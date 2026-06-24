@@ -106,3 +106,36 @@ CREATE TABLE IF NOT EXISTS bio_user (
   updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (tenant_id, device_id, enroll_number)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- License keys (one per school). Super admin generates a key when registering a
+-- school; it unlocks the desktop tool and identifies the tenant.
+CREATE TABLE IF NOT EXISTS bio_license (
+  license_key  CHAR(64) NOT NULL,
+  tenant_id    VARCHAR(64) NOT NULL,
+  client_name  VARCHAR(128) NULL,
+  status       ENUM('active','revoked') NOT NULL DEFAULT 'active',
+  expires_at   DATE NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (license_key),
+  KEY idx_tenant (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Attendance devices the super admin has registered for a school (by serial+MAC).
+-- serial is UNIQUE, so a device bound to one college cannot be used by another.
+-- id is the stable numeric device id used in bio_punch / bio_user (desktop flow).
+CREATE TABLE IF NOT EXISTS bio_reg_device (
+  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  serial        VARCHAR(64) NOT NULL,
+  mac           VARCHAR(32) NULL,
+  tenant_id     VARCHAR(64) NOT NULL,
+  license_key   CHAR(64) NOT NULL,
+  label         VARCHAR(64) NULL,
+  status        ENUM('active','revoked') NOT NULL DEFAULT 'active',
+  registered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at  DATETIME NULL,
+  app_version   VARCHAR(32) NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_serial (serial),
+  KEY idx_tenant (tenant_id),
+  KEY idx_mac (mac)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

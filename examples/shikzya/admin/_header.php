@@ -43,6 +43,7 @@ $active = $active ?? '';
     <a class="<?= $active==='dash'?'on':'' ?>" href="index.php">Dashboard</a>
     <a class="<?= $active==='sites'?'on':'' ?>" href="sites.php">Sites &amp; Devices</a>
     <a class="<?= $active==='att'?'on':'' ?>" href="attendance.php">Attendance</a>
+    <a class="<?= $active==='lic'?'on':'' ?>" href="licenses.php">Licenses</a>
   </nav>
   <form class="tenant" method="get" action="index.php">
     <label style="margin:0">Tenant</label>

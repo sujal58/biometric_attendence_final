@@ -72,6 +72,25 @@ function require_site(): array
     return $site;
 }
 
+/** Resolves a license key (the desktop tool's bearer) to its row, or null. */
+function find_license(?string $token): ?array
+{
+    if (!$token) return null;
+    $st = db()->prepare('SELECT license_key, tenant_id, client_name, status, expires_at FROM bio_license WHERE license_key = ?');
+    $st->execute([$token]);
+    $row = $st->fetch();
+    return $row ?: null;
+}
+
+/** 401/403 unless the license is present, active and not expired. */
+function require_valid_license(?array $lic): array
+{
+    if (!$lic) json_error(401, 'invalid license key');
+    if (($lic['status'] ?? '') !== 'active') json_error(403, 'license revoked — contact your administrator');
+    if (!empty($lic['expires_at']) && $lic['expires_at'] < date('Y-m-d')) json_error(403, 'license expired');
+    return $lic;
+}
+
 function read_json(): array
 {
     $d = json_decode(file_get_contents('php://input'), true);
