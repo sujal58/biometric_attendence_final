@@ -1,27 +1,27 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using AttendanceBridge.Api;
 using AttendanceBridge.Data;
 using AttendanceBridge.Device;
 
 namespace AttendanceDesktop
 {
     /// <summary>
-    /// Simple school/technician tool: shows device info + status, fetches
-    /// attendance (auto on open + button), and pushes punches to Shikzya (the API
-    /// tags them by tenant via the site token). Reuses the proven device layer.
+    /// School/technician tool for ONE client with MULTIPLE devices. Shows device
+    /// info/status, fetches attendance (auto on open + buttons) from each device
+    /// in turn, and pushes punches to MySQL and/or the Shikzya API.
     /// </summary>
     public sealed class MainForm : Form
     {
         private DesktopConfig _cfg = DesktopConfig.Load();
-        private DeviceConnection _conn;
+        private PushService _push;
         private bool _busy;
 
-        private Button _btnConnect, _btnFetch, _btnSync, _btnSettings;
+        private ComboBox _deviceSelect;
+        private Button _btnFetchAll, _btnFetchOne, _btnInfo, _btnSync, _btnSettings;
         private Label _status;
         private TextBox _info;
         private DataGridView _grid;
@@ -30,25 +30,30 @@ namespace AttendanceDesktop
         {
             Text = "Shikzya Attendance — Device Tool";
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(820, 560);
-            MinimumSize = new Size(640, 420);
+            ClientSize = new Size(900, 600);
+            MinimumSize = new Size(700, 460);
+            _push = new PushService(_cfg);
             BuildUi();
-            Shown += async (s, e) => await ConnectAndRefresh(autoFetch: true);
-            FormClosing += (s, e) => { try { _conn?.Dispose(); } catch { } };
+            ReloadDevices();
+            Shown += async (s, e) => await Guarded(FetchAllAsync);
         }
 
         private void BuildUi()
         {
             var bar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 48, Padding = new Padding(8, 8, 8, 0) };
-            _btnConnect = MakeButton("Connect", async () => await ConnectAndRefresh(false));
-            _btnFetch = MakeButton("Fetch attendance", async () => await DoFetch());
-            _btnSync = MakeButton("Sync time", async () => await DoSyncTime());
+            _deviceSelect = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200, Margin = new Padding(4, 4, 12, 0) };
+            _deviceSelect.SelectedIndexChanged += async (s, e) => { if (!_busy) await Guarded(ShowSelectedInfoAsync); };
+            _btnFetchAll = MakeButton("Fetch all devices", () => Guarded(FetchAllAsync));
+            _btnFetchOne = MakeButton("Fetch selected", () => Guarded(FetchSelectedAsync));
+            _btnInfo = MakeButton("Refresh info", () => Guarded(ShowSelectedInfoAsync));
+            _btnSync = MakeButton("Sync time", () => Guarded(SyncSelectedAsync));
             _btnSettings = MakeButton("Settings…", OpenSettings);
-            bar.Controls.AddRange(new Control[] { _btnConnect, _btnFetch, _btnSync, _btnSettings });
+            bar.Controls.AddRange(new Control[] { _deviceSelect, _btnFetchAll, _btnFetchOne, _btnInfo, _btnSync, _btnSettings });
 
-            _info = new TextBox { Dock = DockStyle.Top, Height = 130, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 9F), BackColor = Color.White };
+            _info = new TextBox { Dock = DockStyle.Top, Height = 120, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 9F), BackColor = Color.White };
 
             _grid = new DataGridView { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, SelectionMode = DataGridViewSelectionMode.FullRowSelect };
+            _grid.Columns.Add("device", "Device");
             _grid.Columns.Add("user", "User #");
             _grid.Columns.Add("time", "Time");
             _grid.Columns.Add("verify", "Verify");
@@ -66,7 +71,7 @@ namespace AttendanceDesktop
         private Button MakeButton(string text, Func<Task> handler)
         {
             var b = new Button { Text = text, AutoSize = true, Height = 32, Margin = new Padding(4, 0, 4, 0) };
-            b.Click += async (s, e) => await Guarded(handler);
+            b.Click += async (s, e) => await handler();
             return b;
         }
         private Button MakeButton(string text, Action handler)
@@ -76,7 +81,27 @@ namespace AttendanceDesktop
             return b;
         }
 
-        // Run one device operation at a time; keep the UI responsive.
+        private void ReloadDevices()
+        {
+            _deviceSelect.Items.Clear();
+            foreach (var d in _cfg.Devices)
+                _deviceSelect.Items.Add(string.IsNullOrWhiteSpace(d.Name) ? d.Ip : d.Name);
+            if (_deviceSelect.Items.Count > 0) _deviceSelect.SelectedIndex = 0;
+        }
+
+        private DesktopConfig.DeviceEntry Selected()
+        {
+            int i = _deviceSelect.SelectedIndex;
+            return (i >= 0 && i < _cfg.Devices.Count) ? _cfg.Devices[i] : null;
+        }
+
+        private static DeviceParams ToParams(DesktopConfig.DeviceEntry d) => new DeviceParams
+        {
+            IpAddress = d.Ip, NetPort = d.Port, MachineNo = d.MachineNo,
+            NetPassword = d.NetPassword, License = d.License, TimeoutMs = 5000,
+        };
+
+        // Only one device operation at a time (the SDK is single-session).
         private async Task Guarded(Func<Task> work)
         {
             if (_busy) return;
@@ -87,109 +112,100 @@ namespace AttendanceDesktop
             finally { _busy = false; SetButtons(true); }
         }
 
-        private void SetButtons(bool on)
-        {
-            _btnConnect.Enabled = _btnFetch.Enabled = _btnSync.Enabled = _btnSettings.Enabled = on;
-        }
+        private void SetButtons(bool on) =>
+            _btnFetchAll.Enabled = _btnFetchOne.Enabled = _btnInfo.Enabled = _btnSync.Enabled = _btnSettings.Enabled = _deviceSelect.Enabled = on;
 
         private void SetStatus(string s) => _status.Text = s;
 
-        private bool EnsureParams()
-        {
-            if (!string.IsNullOrWhiteSpace(_cfg.Device.Ip)) return true;
-            SetStatus("Set the device IP in Settings first.");
-            return false;
-        }
+        // ---- operations ----
 
-        private DeviceParams Params() => new DeviceParams
+        private async Task FetchAllAsync()
         {
-            IpAddress = _cfg.Device.Ip, NetPort = _cfg.Device.Port, MachineNo = _cfg.Device.MachineNo,
-            NetPassword = _cfg.Device.NetPassword, License = _cfg.Device.License, TimeoutMs = 5000,
-        };
-
-        private async Task<bool> EnsureConnected()
-        {
-            if (_conn != null && _conn.IsConnected) return true;
-            if (!EnsureParams()) return false;
-
-            SetStatus("Connecting to " + _cfg.Device.Ip + " …");
-            _conn?.Dispose();
-            _conn = new DeviceConnection(Params());
-            bool ok = await Task.Run(() => _conn.Connect());
-            SetStatus(ok ? "Connected to " + _cfg.Device.Ip + "." : "Could not connect to " + _cfg.Device.Ip + " (check IP / license / network).");
-            return ok;
-        }
-
-        private async Task ConnectAndRefresh(bool autoFetch)
-        {
-            await Guarded(async () =>
+            if (_cfg.Devices.Count == 0) { SetStatus("No devices configured — open Settings to add some."); return; }
+            _grid.Rows.Clear();
+            var summary = new List<string>();
+            foreach (var d in _cfg.Devices)
             {
-                if (!await EnsureConnected()) return;
-                await ShowInfo();
-                if (autoFetch) await FetchAndUpload();
-            });
-        }
-
-        private async Task ShowInfo()
-        {
-            var snap = await Task.Run(() => new DeviceInfoModule(_conn).Read());
-            DateTime devTime;
-            try { devTime = await Task.Run(() => new TimeSyncModule(_conn).ReadDeviceTime()); }
-            catch { devTime = DateTime.MinValue; }
-
-            _info.Text = string.Join(Environment.NewLine, new[]
-            {
-                "Status        : Connected to " + _cfg.Device.Ip + ":" + _cfg.Device.Port,
-                "Product       : " + snap.ProductName + " (" + snap.ProductCode + ")",
-                "Serial number : " + snap.SerialNumber,
-                "Machine no.   : " + snap.MachineNumber + "    MAC: " + snap.MacAddress,
-                "Users / Mgrs  : " + snap.Users + " / " + snap.Managers + "    Fingerprints: " + snap.Fingerprints + "    Faces: " + snap.Faces,
-                "Attendance logs on device: " + snap.GeneralLogs,
-                "Device time   : " + (devTime == DateTime.MinValue ? "(n/a)" : devTime.ToString("yyyy-MM-dd HH:mm:ss")) + "    PC time: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-            });
-        }
-
-        private async Task DoFetch()
-        {
-            if (!await EnsureConnected()) return;
-            await FetchAndUpload();
-        }
-
-        private async Task FetchAndUpload()
-        {
-            SetStatus("Fetching attendance from the device …");
-            var records = await Task.Run(() => new LogPoller(_conn).Read(0));
-            ShowRecords(records);
-
-            if (records.Count == 0) { SetStatus("No attendance records on the device."); return; }
-
-            if (string.IsNullOrWhiteSpace(_cfg.Upload.SiteToken))
-            {
-                SetStatus("Fetched " + records.Count + " record(s). (No site token set — not uploaded. Add it in Settings.)");
-                return;
+                SetStatus("Fetching " + DevName(d) + " …");
+                summary.Add(await FetchOneAsync(d));
             }
+            SetStatus(string.Join("   |   ", summary));
+        }
 
-            SetStatus("Fetched " + records.Count + " — uploading to Shikzya …");
+        private async Task FetchSelectedAsync()
+        {
+            var d = Selected();
+            if (d == null) { SetStatus("Pick a device first."); return; }
+            _grid.Rows.Clear();
+            SetStatus("Fetching " + DevName(d) + " …");
+            SetStatus(await FetchOneAsync(d));
+        }
+
+        private async Task<string> FetchOneAsync(DesktopConfig.DeviceEntry d)
+        {
+            List<PunchRecord> records;
             try
             {
-                var api = new ApiClient(_cfg.Upload.ApiBaseUrl, _cfg.Upload.SiteToken);
-                var upload = new PunchUpload { DeviceId = _cfg.Upload.DeviceId, Punches = records.Select(ToDto).ToArray() };
-                int inserted = await api.UploadPunchesAsync(upload, CancellationToken.None);
-                SetStatus("Fetched " + records.Count + ", uploaded " + inserted + " new to Shikzya.");
+                records = await Task.Run(() =>
+                {
+                    using var conn = new DeviceConnection(ToParams(d));
+                    if (!conn.Connect()) throw new Exception("connect failed");
+                    try { return new LogPoller(conn).Read(0); }
+                    finally { conn.Disconnect(); }
+                });
             }
-            catch (Exception ex)
-            {
-                SetStatus("Fetched " + records.Count + ". Upload failed: " + ex.Message);
-            }
+            catch (Exception ex) { return DevName(d) + ": connect/read failed (" + ex.Message + ")"; }
+
+            AddRows(DevName(d), records);
+            var pr = await _push.Push(d.DeviceId, records);
+            return DevName(d) + ": read " + records.Count + (records.Count > 0 ? " (" + pr.Message + ")" : "");
         }
 
-        private async Task DoSyncTime()
+        private async Task ShowSelectedInfoAsync()
         {
-            if (!await EnsureConnected()) return;
-            SetStatus("Syncing device clock to this PC …");
-            bool changed = await Task.Run(() => new TimeSyncModule(_conn).SyncIfDrift(30));
-            await ShowInfo();
-            SetStatus(changed ? "Device clock corrected." : "Device clock already within tolerance.");
+            var d = Selected();
+            if (d == null) { _info.Text = ""; return; }
+            try
+            {
+                var (snap, devTime) = await Task.Run(() =>
+                {
+                    using var conn = new DeviceConnection(ToParams(d));
+                    if (!conn.Connect()) throw new Exception("connect failed");
+                    try
+                    {
+                        var s = new DeviceInfoModule(conn).Read();
+                        DateTime t;
+                        try { t = new TimeSyncModule(conn).ReadDeviceTime(); } catch { t = DateTime.MinValue; }
+                        return (s, t);
+                    }
+                    finally { conn.Disconnect(); }
+                });
+                _info.Text = string.Join(Environment.NewLine, new[]
+                {
+                    "Device       : " + DevName(d) + "  (" + d.Ip + ":" + d.Port + ", id " + d.DeviceId + ")",
+                    "Product      : " + snap.ProductName + " (" + snap.ProductCode + ")   Serial: " + snap.SerialNumber,
+                    "Users / Mgrs : " + snap.Users + " / " + snap.Managers + "   Fingerprints: " + snap.Fingerprints + "   Faces: " + snap.Faces,
+                    "Logs on dev  : " + snap.GeneralLogs,
+                    "Device time  : " + (devTime == DateTime.MinValue ? "(n/a)" : devTime.ToString("yyyy-MM-dd HH:mm:ss")) + "   PC time: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                });
+                SetStatus("Connected to " + DevName(d) + ".");
+            }
+            catch (Exception ex) { _info.Text = DevName(d) + ": " + ex.Message; SetStatus("Could not reach " + DevName(d) + "."); }
+        }
+
+        private async Task SyncSelectedAsync()
+        {
+            var d = Selected();
+            if (d == null) { SetStatus("Pick a device first."); return; }
+            bool changed = await Task.Run(() =>
+            {
+                using var conn = new DeviceConnection(ToParams(d));
+                if (!conn.Connect()) throw new Exception("connect failed");
+                try { return new TimeSyncModule(conn).SyncIfDrift(30); }
+                finally { conn.Disconnect(); }
+            });
+            await ShowSelectedInfoAsync();
+            SetStatus(changed ? DevName(d) + ": clock corrected." : DevName(d) + ": clock already in tolerance.");
         }
 
         private void OpenSettings()
@@ -198,27 +214,20 @@ namespace AttendanceDesktop
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    _conn?.Dispose(); _conn = null;   // reconnect with new params
-                    _ = ConnectAndRefresh(false);
+                    _push = new PushService(_cfg);   // pick up new connection string / targets
+                    ReloadDevices();
+                    _ = Guarded(ShowSelectedInfoAsync);
                 }
             }
         }
 
-        private void ShowRecords(System.Collections.Generic.List<PunchRecord> records)
+        private void AddRows(string deviceName, List<PunchRecord> records)
         {
-            _grid.Rows.Clear();
             foreach (var r in records)
-                _grid.Rows.Add(r.EnrollNumber, r.PunchTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                _grid.Rows.Add(deviceName, r.EnrollNumber, r.PunchTime.ToString("yyyy-MM-dd HH:mm:ss"),
                     r.VerifyLabel, r.IoMode, r.Temperature.HasValue ? (r.Temperature.Value / 10.0).ToString("0.0") : "");
         }
 
-        private static PunchDto ToDto(PunchRecord r) => new PunchDto
-        {
-            EnrollNumber = r.EnrollNumber,
-            PunchTime = r.PunchTime.ToString("yyyy-MM-ddTHH:mm:ss"),
-            VerifyMode = r.VerifyMode, VerifyLabel = r.VerifyLabel,
-            InOutMode = r.InOutMode, IoMode = r.IoMode, DoorMode = r.DoorMode,
-            Temperature = r.Temperature,
-        };
+        private static string DevName(DesktopConfig.DeviceEntry d) => string.IsNullOrWhiteSpace(d.Name) ? d.Ip : d.Name;
     }
 }

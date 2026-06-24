@@ -28,6 +28,19 @@
     <Compile Include="..\AttendanceBridge\Logging\**\*.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="MySqlConnector" Version="2.4.0" />
+    <!-- DPAPI for encrypting the saved MySQL connection string. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- Embed the schema so direct-MySQL push can auto-create the bio_* tables. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\db\schema.sql">
+      <LogicalName>ShikzyaDeviceTool.schema.sql</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
   <!-- Native TimeWatch SDK DLLs copied next to the exe. -->
   <ItemGroup>
     <Content Include="..\..\native\*.dll">

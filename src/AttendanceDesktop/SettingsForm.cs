@@ -1,73 +1,137 @@
 using System;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace AttendanceDesktop
 {
-    /// <summary>Technician settings: which device to talk to + where to push punches.</summary>
+    /// <summary>Technician settings: the client (tenant), where to push, and the device list.</summary>
     public sealed class SettingsForm : Form
     {
         private readonly DesktopConfig _cfg;
-        private TextBox _ip, _port, _machine, _pass, _license, _api, _token, _deviceId;
+        private readonly BindingList<DesktopConfig.DeviceEntry> _devices;
+
+        private TextBox _tenant, _site, _conn, _api, _token;
+        private ComboBox _push;
+        private DataGridView _grid;
 
         public SettingsForm(DesktopConfig cfg)
         {
             _cfg = cfg;
+            // Edit a copy of the device list so Cancel discards changes.
+            _devices = new BindingList<DesktopConfig.DeviceEntry>(
+                cfg.Devices.Select(Clone).ToList());
+
             Text = "Settings";
-            FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
-            MaximizeBox = false; MinimizeBox = false;
-            ClientSize = new Size(420, 430);
+            FormBorderStyle = FormBorderStyle.Sizable;
+            ClientSize = new Size(680, 540);
+            MinimumSize = new Size(620, 480);
 
-            int y = 16;
-            AddHeader("Device (on the school's LAN)", ref y);
-            _ip = AddField("IP address", _cfg.Device.Ip, ref y);
-            _port = AddField("Port", _cfg.Device.Port.ToString(), ref y);
-            _machine = AddField("Machine #", _cfg.Device.MachineNo.ToString(), ref y);
-            _pass = AddField("Comm password", _cfg.Device.NetPassword.ToString(), ref y);
-            _license = AddField("License", _cfg.Device.License.ToString(), ref y);
+            BuildUi();
+            Load += (s, e) => LoadValues();
+        }
 
-            y += 8;
-            AddHeader("Push to Shikzya", ref y);
-            _api = AddField("API base URL", _cfg.Upload.ApiBaseUrl, ref y);
-            _token = AddField("Site token", _cfg.Upload.SiteToken, ref y);
-            _deviceId = AddField("Device id", _cfg.Upload.DeviceId.ToString(), ref y);
+        private void BuildUi()
+        {
+            var fields = new TableLayoutPanel { Dock = DockStyle.Top, Height = 200, ColumnCount = 2, Padding = new Padding(10), AutoSize = false };
+            fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+            fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-            var ok = new Button { Text = "Save", DialogResult = DialogResult.OK, Location = new Point(230, y + 10), Size = new Size(80, 30) };
-            var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Location = new Point(320, y + 10), Size = new Size(80, 30) };
-            ok.Click += (s, e) => Apply();
-            Controls.Add(ok); Controls.Add(cancel);
+            _tenant = AddRow(fields, "Tenant id (client):");
+            _site = AddRow(fields, "Site id (optional):");
+            _push = AddCombo(fields, "Push to:", new[] { "MySQL (direct)", "API only", "Both" });
+            _conn = AddRow(fields, "MySQL connection:");
+            _api = AddRow(fields, "API base URL:");
+            _token = AddRow(fields, "Site token:");
+
+            var devLabel = new Label { Dock = DockStyle.Top, Height = 24, Text = "Devices (one row per machine):", Padding = new Padding(10, 4, 0, 0) };
+
+            _grid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                DataSource = _devices,
+                AutoGenerateColumns = true,
+                AllowUserToAddRows = true,
+                AllowUserToDeleteRows = true,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                RowHeadersVisible = true,
+            };
+
+            var devBar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 36, Padding = new Padding(8, 4, 0, 0) };
+            var add = new Button { Text = "Add device", AutoSize = true };
+            var remove = new Button { Text = "Remove selected", AutoSize = true };
+            add.Click += (s, e) => _devices.Add(new DesktopConfig.DeviceEntry { Name = "Device " + (_devices.Count + 1) });
+            remove.Click += (s, e) => { foreach (DataGridViewRow row in _grid.SelectedRows.Cast<DataGridViewRow>().ToList()) if (!row.IsNewRow) _grid.Rows.Remove(row); };
+            devBar.Controls.AddRange(new Control[] { add, remove });
+
+            var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0, 8, 10, 0) };
+            var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Size = new Size(90, 30) };
+            var ok = new Button { Text = "Save", Size = new Size(90, 30) };
+            ok.Click += (s, e) => { if (Apply()) DialogResult = DialogResult.OK; };
+            bottom.Controls.AddRange(new Control[] { ok, cancel });
             AcceptButton = ok; CancelButton = cancel;
+
+            // Order matters: Fill first, then docked tops/bottoms around it.
+            Controls.Add(_grid);
+            Controls.Add(devBar);
+            Controls.Add(devLabel);
+            Controls.Add(fields);
+            Controls.Add(bottom);
         }
 
-        private void AddHeader(string text, ref int y)
+        private int _row;
+        private TextBox AddRow(TableLayoutPanel t, string label)
         {
-            Controls.Add(new Label { Text = text, Font = new Font(Font, FontStyle.Bold), Location = new Point(14, y), AutoSize = true });
-            y += 24;
-        }
-
-        private TextBox AddField(string label, string value, ref int y)
-        {
-            Controls.Add(new Label { Text = label, Location = new Point(20, y + 3), Size = new Size(110, 20) });
-            var tb = new TextBox { Text = value, Location = new Point(140, y), Size = new Size(260, 24) };
-            Controls.Add(tb);
-            y += 30;
+            t.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 0, 0) }, 0, _row);
+            var tb = new TextBox { Dock = DockStyle.Fill, Margin = new Padding(0, 3, 0, 3) };
+            t.Controls.Add(tb, 1, _row);
+            _row++;
             return tb;
         }
-
-        private static int I(TextBox t, int def) => int.TryParse(t.Text.Trim(), out var v) ? v : def;
-
-        private void Apply()
+        private ComboBox AddCombo(TableLayoutPanel t, string label, string[] items)
         {
-            _cfg.Device.Ip = _ip.Text.Trim();
-            _cfg.Device.Port = I(_port, 5005);
-            _cfg.Device.MachineNo = I(_machine, 1);
-            _cfg.Device.NetPassword = I(_pass, 0);
-            _cfg.Device.License = I(_license, 1261);
-            _cfg.Upload.ApiBaseUrl = _api.Text.Trim();
-            _cfg.Upload.SiteToken = _token.Text.Trim();
-            _cfg.Upload.DeviceId = I(_deviceId, 1);
-            _cfg.Save();
+            t.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 0, 0) }, 0, _row);
+            var cb = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Margin = new Padding(0, 3, 0, 3) };
+            cb.Items.AddRange(items);
+            t.Controls.Add(cb, 1, _row);
+            _row++;
+            return cb;
         }
+
+        private void LoadValues()
+        {
+            _tenant.Text = _cfg.TenantId;
+            _site.Text = _cfg.SiteId.ToString();
+            _push.SelectedIndex = (int)_cfg.Push;   // Mysql=0, Api=1, Both=2
+            _conn.Text = _cfg.Db.ConnectionString;
+            _api.Text = _cfg.Api.ApiBaseUrl;
+            _token.Text = _cfg.Api.SiteToken;
+        }
+
+        private bool Apply()
+        {
+            _cfg.TenantId = _tenant.Text.Trim();
+            _cfg.SiteId = long.TryParse(_site.Text.Trim(), out var sid) ? sid : 0;
+            _cfg.Push = (PushTarget)Math.Max(0, _push.SelectedIndex);
+            _cfg.Db.ConnectionString = _conn.Text.Trim();
+            _cfg.Api.ApiBaseUrl = _api.Text.Trim();
+            _cfg.Api.SiteToken = _token.Text.Trim();
+
+            // Keep only devices with an IP; commit the edited list.
+            _cfg.Devices = _devices.Where(d => !string.IsNullOrWhiteSpace(d.Ip)).Select(Clone).ToList();
+
+            try { _cfg.Save(); }
+            catch (Exception ex) { MessageBox.Show("Could not save settings: " + ex.Message, "Settings", MessageBoxButtons.OK, MessageBoxIcon.Error); return false; }
+            return true;
+        }
+
+        private static DesktopConfig.DeviceEntry Clone(DesktopConfig.DeviceEntry d) => new DesktopConfig.DeviceEntry
+        {
+            Name = d.Name, Ip = d.Ip, Port = d.Port, MachineNo = d.MachineNo,
+            NetPassword = d.NetPassword, License = d.License, DeviceId = d.DeviceId,
+        };
     }
 }
