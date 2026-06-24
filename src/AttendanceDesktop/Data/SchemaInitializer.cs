@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using MySqlConnector;
 
 namespace AttendanceDesktop.Data
@@ -35,18 +36,21 @@ namespace AttendanceDesktop.Data
 
         private static IEnumerable<string> SplitStatements(string sql)
         {
-            foreach (var part in sql.Split(';'))
+            // Strip "--" line comments first, so a ';' inside a comment can never
+            // break statement splitting (our DDL has no '--' inside string literals).
+            var sb = new StringBuilder();
+            foreach (var rawLine in sql.Split('\n'))
+            {
+                var line = rawLine;
+                int c = line.IndexOf("--", StringComparison.Ordinal);
+                if (c >= 0) line = line.Substring(0, c);
+                sb.Append(line).Append('\n');
+            }
+
+            foreach (var part in sb.ToString().Split(';'))
             {
                 var stmt = part.Trim();
-                if (stmt.Length == 0) continue;
-
-                bool hasSql = false;
-                foreach (var line in stmt.Split('\n'))
-                {
-                    var l = line.Trim();
-                    if (l.Length > 0 && !l.StartsWith("--")) { hasSql = true; break; }
-                }
-                if (hasSql) yield return stmt;
+                if (stmt.Length > 0) yield return stmt;
             }
         }
     }

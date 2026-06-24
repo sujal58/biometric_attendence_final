@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS bio_enroll_map (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- On-demand fetch queue. Shikzya inserts 'pending' when a school clicks "Fetch
--- attendance"; the API hands it to the site's agent, which pulls and reports back.
+-- attendance" the API hands it to the site's agent, which pulls and reports back.
 CREATE TABLE IF NOT EXISTS bio_fetch_command (
   id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   tenant_id        VARCHAR(64) NOT NULL,
