@@ -23,6 +23,12 @@ the 32-bit SDK).
 - Fetched punches are pushed to **MySQL directly** (idempotent upsert into
   `bio_punch`, tenant + device tagged; tables auto-create) and/or the **Shikzya
   API**, per the push target.
+- Also reads the **user roster** (enroll # + **name**) from each device — punches
+  show names, and the roster is written to `bio_user`; each device's status is
+  written to `bio_device`.
+- **Export CSV** of the fetched table; **Test device** / **Test MySQL** buttons in
+  Settings; optional **auto-fetch every N minutes** with **minimise-to-tray** for
+  hands-off running without a service.
 
 ### Security
 The MySQL connection string is stored **DPAPI-encrypted** (current-user) in

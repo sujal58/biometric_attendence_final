@@ -123,5 +123,27 @@ namespace AttendanceBridge.Interop
 
         [DllImport(Dll, CharSet = CharSet.Ansi)]
         public static extern int FK_EmptyGeneralLogData(int anHandleIndex);
+
+        // ---- User roster (enroll ids + names) ---------------------------
+        // FK_ReadAllUserID loads the user list into the SDK, then
+        // FK_GetAllUserID is looped until RUNERR_DATAARRAY_END (-7) to get each
+        // (enroll, backup) entry; FK_GetUserName fetches a user's name.
+
+        [DllImport(Dll, CharSet = CharSet.Ansi)]
+        public static extern int FK_ReadAllUserID(int anHandleIndex);
+
+        [DllImport(Dll, CharSet = CharSet.Ansi)]
+        public static extern int FK_GetAllUserID(
+            int anHandleIndex,
+            ref int apnEnrollNumber,
+            ref int apnBackupNumber,
+            ref int apnMachinePrivilege,
+            ref int apnEnable);
+
+        [DllImport(Dll, CharSet = CharSet.Ansi)]
+        public static extern int FK_GetUserName(
+            int anHandleIndex,
+            int anEnrollNumber,
+            [MarshalAs(UnmanagedType.LPStr)] ref string apstrUserName);
     }
 }

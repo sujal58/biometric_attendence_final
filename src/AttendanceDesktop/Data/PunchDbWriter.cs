@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using MySqlConnector;
 using AttendanceBridge.Data;
+using AttendanceBridge.Device;
 
 namespace AttendanceDesktop.Data
 {
@@ -67,6 +68,64 @@ namespace AttendanceDesktop.Data
             }
             tx.Commit();
             return inserted;
+        }
+
+        /// <summary>Upserts the device's user roster into bio_user. Returns count written.</summary>
+        public int UpsertUsers(string tenantId, int deviceId, IReadOnlyList<DeviceUser> users)
+        {
+            if (users == null || users.Count == 0) return 0;
+
+            using var conn = new MySqlConnection(_cs);
+            conn.Open();
+            if (!_schemaEnsured) { SchemaInitializer.EnsureSchema(conn); _schemaEnsured = true; }
+
+            const string sql =
+                "INSERT INTO bio_user (tenant_id, device_id, enroll_number, name, privilege, enabled, updated_at) " +
+                "VALUES (@t,@d,@e,@n,@p,@en,NOW()) " +
+                "ON DUPLICATE KEY UPDATE name=@n, privilege=@p, enabled=@en, updated_at=NOW();";
+
+            int n = 0;
+            using var tx = conn.BeginTransaction();
+            foreach (var u in users)
+            {
+                using var cmd = new MySqlCommand(sql, conn, tx);
+                cmd.Parameters.AddWithValue("@t", tenantId ?? "");
+                cmd.Parameters.AddWithValue("@d", deviceId);
+                cmd.Parameters.AddWithValue("@e", u.EnrollNumber);
+                cmd.Parameters.AddWithValue("@n", (object)u.Name ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@p", u.Privilege);
+                cmd.Parameters.AddWithValue("@en", u.Enabled ? 1 : 0);
+                cmd.ExecuteNonQuery();
+                n++;
+            }
+            tx.Commit();
+            return n;
+        }
+
+        /// <summary>Upserts a row into bio_device with the latest fetch status.</summary>
+        public void UpsertDevice(string tenantId, long siteId, DesktopConfig.DeviceEntry d, string lastStatus)
+        {
+            using var conn = new MySqlConnection(_cs);
+            conn.Open();
+            if (!_schemaEnsured) { SchemaInitializer.EnsureSchema(conn); _schemaEnsured = true; }
+
+            const string sql =
+                "INSERT INTO bio_device (device_id, site_id, tenant_id, name, ip, port, machine_no, net_password, license, last_pull_at, last_status) " +
+                "VALUES (@d,@s,@t,@n,@ip,@port,@mn,@np,@lic,NOW(),@st) " +
+                "ON DUPLICATE KEY UPDATE name=@n, ip=@ip, port=@port, machine_no=@mn, net_password=@np, license=@lic, last_pull_at=NOW(), last_status=@st;";
+
+            using var cmd = new MySqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@d", d.DeviceId);
+            cmd.Parameters.AddWithValue("@s", siteId);
+            cmd.Parameters.AddWithValue("@t", tenantId ?? "");
+            cmd.Parameters.AddWithValue("@n", string.IsNullOrWhiteSpace(d.Name) ? d.Ip : d.Name);
+            cmd.Parameters.AddWithValue("@ip", d.Ip ?? "");
+            cmd.Parameters.AddWithValue("@port", d.Port);
+            cmd.Parameters.AddWithValue("@mn", d.MachineNo);
+            cmd.Parameters.AddWithValue("@np", d.NetPassword);
+            cmd.Parameters.AddWithValue("@lic", d.License);
+            cmd.Parameters.AddWithValue("@st", lastStatus ?? "");
+            cmd.ExecuteNonQuery();
         }
     }
 }

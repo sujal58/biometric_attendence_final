@@ -93,3 +93,16 @@ CREATE TABLE IF NOT EXISTS bio_fetch_command (
   PRIMARY KEY (id),
   KEY idx_pending (site_id, status, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Enrolled users read from the device (enroll_number + name). Lets attendance
+-- show names and lets you map device users to Shikzya students.
+CREATE TABLE IF NOT EXISTS bio_user (
+  tenant_id     VARCHAR(64) NOT NULL,
+  device_id     INT NOT NULL,
+  enroll_number INT NOT NULL,
+  name          VARCHAR(128) NULL,
+  privilege     INT NOT NULL DEFAULT 0,
+  enabled       TINYINT NOT NULL DEFAULT 1,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_id, device_id, enroll_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

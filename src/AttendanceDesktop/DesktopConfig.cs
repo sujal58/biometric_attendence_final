@@ -20,6 +20,7 @@ namespace AttendanceDesktop
         public string TenantId { get; set; } = "";
         public long SiteId { get; set; } = 0;            // tags bio_punch.site_id
         public PushTarget Push { get; set; } = PushTarget.Mysql;
+        public int AutoFetchMinutes { get; set; } = 0;   // 0 = off; else fetch-all every N minutes
         public DbCfg Db { get; set; } = new DbCfg();
         public ApiCfg Api { get; set; } = new ApiCfg();
         public List<DeviceEntry> Devices { get; set; } = new List<DeviceEntry>();
